@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.spearce</groupId>
+    <artifactId>jgit-parent</artifactId>
+    <version>0.4-SNAPSHOT</version>  
+  </parent>
+  <artifactId>org.spearce.jgit</artifactId>
+  <name>JGit :: Core</name>
+  <dependencies>
+    <dependency>
+      <groupId>com.jcraft</groupId>
+      <artifactId>jsch</artifactId>
+    </dependency>    
+  </dependencies>
+  <build>
+    <sourceDirectory>src</sourceDirectory>    
+    <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>2.4.2</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*TestCase.java</include>
+                        <include>**/T000*.java</include>
+                    </includes>
+                </configuration>
+           </plugin>            
+    </plugins>
+  </build>
+</project>
