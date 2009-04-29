@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, Google Inc.
+ * Copyright (C) 2009, Google Inc.
  *
  * All rights reserved.
  *
@@ -35,30 +35,21 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.pgm;
+package org.spearce.jgit.errors;
 
-import java.io.File;
+import java.io.IOException;
 
-import org.kohsuke.args4j.Option;
-import org.spearce.jgit.lib.Repository;
+/** Thrown when a PackFile no longer matches the PackIndex. */
+public class PackMismatchException extends IOException {
+	private static final long serialVersionUID = 1L;
 
-@Command(common = true, usage = "Create an empty git repository")
-class Init extends TextBuiltin {
-	@Option(name = "--bare", usage = "Create a bare repository")
-	private boolean bare;
-
-	@Override
-	protected final boolean requiresRepository() {
-		return false;
-	}
-
-	@Override
-	protected void run() throws Exception {
-		if (gitdir == null)
-			gitdir = new File(bare ? "." : ".git");
-		db = new Repository(gitdir);
-		db.create(bare);
-		out.println("Initialized empty Git repository in "
-				+ gitdir.getAbsolutePath());
+	/**
+	 * Construct a pack modification error.
+	 *
+	 * @param why
+	 *            description of the type of error.
+	 */
+	public PackMismatchException(final String why) {
+		super(why);
 	}
 }

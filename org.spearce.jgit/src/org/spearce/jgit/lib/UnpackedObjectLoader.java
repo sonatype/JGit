@@ -38,6 +38,7 @@
 
 package org.spearce.jgit.lib;
 
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -46,6 +47,7 @@ import java.util.zip.Inflater;
 
 import org.spearce.jgit.errors.CorruptObjectException;
 import org.spearce.jgit.util.MutableInteger;
+import org.spearce.jgit.util.NB;
 import org.spearce.jgit.util.RawParseUtils;
 
 /**
@@ -59,32 +61,32 @@ public class UnpackedObjectLoader extends ObjectLoader {
 	private final byte[] bytes;
 
 	/**
-	 * Construct an ObjectLoader for the specified SHA-1
+	 * Construct an ObjectLoader to read from the file.
 	 *
-	 * @param db
-	 *            repository
+	 * @param path
+	 *            location of the loose object to read.
 	 * @param id
-	 *            SHA-1
+	 *            expected identity of the object being loaded, if known.
+	 * @throws FileNotFoundException
+	 *             the loose object file does not exist.
 	 * @throws IOException
+	 *             the loose object file exists, but is corrupt.
 	 */
-	public UnpackedObjectLoader(final Repository db, final AnyObjectId id)
+	public UnpackedObjectLoader(final File path, final AnyObjectId id)
 			throws IOException {
-		this(readCompressed(db, id), id);
+		this(readCompressed(path), id);
 	}
 
-	private static byte[] readCompressed(final Repository db,
-			final AnyObjectId id) throws FileNotFoundException, IOException {
-		final FileInputStream objStream = new FileInputStream(db.toFile(id));
-		final byte[] compressed;
+	private static byte[] readCompressed(final File path)
+			throws FileNotFoundException, IOException {
+		final FileInputStream in = new FileInputStream(path);
 		try {
-			compressed = new byte[objStream.available()];
-			int off = 0;
-			while (off < compressed.length)
-				off += objStream.read(compressed, off, compressed.length - off);
+			final byte[] compressed = new byte[(int) in.getChannel().size()];
+			NB.readFully(in, compressed, 0, compressed.length);
+			return compressed;
 		} finally {
-			objStream.close();
+			in.close();
 		}
-		return compressed;
 	}
 
 	/**
@@ -190,16 +192,18 @@ public class UnpackedObjectLoader extends ObjectLoader {
 			throw new CorruptObjectException(id, "incorrect length");
 	}
 
+	@Override
 	public int getType() {
 		return objectType;
 	}
 
+	@Override
 	public long getSize() {
 		return objectSize;
 	}
 
 	@Override
-	public byte[] getCachedBytes() throws IOException {
+	public byte[] getCachedBytes() {
 		return bytes;
 	}
 
