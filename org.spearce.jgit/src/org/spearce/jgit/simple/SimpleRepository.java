@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2009, Shawn O. Pearce <spearce@spearce.org>
- * Copyright (C) 2009, Mark Struberg <struberg@yahoo.org>
+ * Copyright (C) 2009, Mark Struberg <struberg@yahoo.de>
  *
  * All rights reserved.
  *
