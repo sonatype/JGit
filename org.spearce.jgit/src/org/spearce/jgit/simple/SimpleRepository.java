@@ -50,6 +50,7 @@ import org.spearce.jgit.errors.NoRemoteRepositoryException;
 import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
 import org.spearce.jgit.errors.TransportException;
+import org.spearce.jgit.ignore.IgnoreRules;
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.GitIndex;
@@ -62,6 +63,7 @@ import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
 import org.spearce.jgit.lib.WorkDirCheckout;
+import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.transport.FetchResult;
 import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
@@ -82,7 +84,12 @@ public class SimpleRepository {
 	/**
 	 * the HEAD after a fetch
 	 */
-	private Ref head;
+	private Ref currentHead;
+	
+	/**
+	 * handle all ignore rules for this repository
+	 */
+	private IgnoreRules ignores;
 	
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-init
@@ -182,6 +189,8 @@ public class SimpleRepository {
 
 		db.getConfig().setBoolean("core", null, "bare", false);
 		db.getConfig().save();
+		
+		ignores = new IgnoreRules(db);
 	}
 	
 	/**
@@ -236,7 +245,9 @@ public class SimpleRepository {
 	}
 
 	/**
-	 * Fetch all new objects from the foreign repo
+	 * Fetch all new objects from the foreign repo.
+	 * This function also sets the {@code #currentHead}
+	 * 
 	 * @param remoteName like 'origin'
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws URISyntaxException 
@@ -258,12 +269,13 @@ public class SimpleRepository {
 			tn.close();
 		}
 		assert r != null;
-		head = guessHEAD(r);
-		assert head != null;
+		currentHead = guessHEAD(r);
+		assert currentHead != null;
 	}
 
 	/**
-	 * TODO review if we really need this!
+	 * Guess the HEAD Ref from the given FetchResult
+	 * TODO review if we really need this! 
 	 * @param result
 	 * @return HEAD 
 	 */
@@ -320,7 +332,7 @@ public class SimpleRepository {
 			db.writeSymref(Constants.HEAD, branch);
 		}
 		
-		Ref branchRef = head;
+		Ref branchRef = currentHead;
 		if (branchRef == null) {
 			throw new RevisionSyntaxException(branch, "cannot find branch ");
 		}
@@ -339,5 +351,58 @@ public class SimpleRepository {
 		index.write();
 	}
 
+	/**
+	 * Add a given file or directory to the index.
+	 * @param toAdd file or directory which should be added
+	 * @return a List with all added files
+	 * @throws Exception
+	 */
+	public List<File> gitAdd(File toAdd) 
+	throws Exception {
+		List<File> addedFiles = new ArrayList<File>();
+		
+		if  (toAdd == null) {
+			throw new IllegalArgumentException("toAdd must not be null!");
+		}
+		
+		if (!toAdd.getAbsolutePath().startsWith(db.getWorkDir().getAbsolutePath())) {
+			throw new IllegalArgumentException("toAdd must be within repository " + db.getWorkDir());
+		}
+		
+		// the relative path inside the repo
+		String repoPath =  toAdd.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
+		
+		GitIndex index = db.getIndex();
+		
+		//check for ignored files!
+		if (ignores.isIgnored(toAdd)) {
+			return addedFiles;
+		}
 
+		if (toAdd.isDirectory()) {
+			for(File f : toAdd.listFiles()) {
+				// recursively add files
+				addedFiles.addAll(gitAdd(f));
+			}
+		} else {
+			Entry entry = index.getEntry(repoPath);
+			if (entry != null) {
+				if (!entry.isAssumedValid()) {
+					System.out.println("Already tracked - skipping");
+					return addedFiles;
+				}
+			}
+		}
+
+		//X TODO this should be implemented using DirCache!
+		Entry entry = index.add(db.getWorkDir(), toAdd);
+		entry.setAssumeValid(false);
+		
+		index.write();
+		
+		addedFiles.add(toAdd);
+		
+		return addedFiles;
+	}
+	
 }
