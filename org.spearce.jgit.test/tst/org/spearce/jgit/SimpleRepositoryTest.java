@@ -74,9 +74,20 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		File repoDir = new File(REPO_LOCATION);
 		recursiveDelete(repoDir);
 		URIish uri = new URIish("file://" + trash.getAbsolutePath());
-		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master");
+		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
+		assertNotNull(srep);
+	}
+	
+	public void testCheckout() throws Exception {
+		File repoDir = new File(REPO_LOCATION);
+		recursiveDelete(repoDir);
+		URIish uri = new URIish("file://" + trash.getAbsolutePath());
+		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
 		assertNotNull(srep);
 		
+		srep.gitCheckout("master", null);
+		File testFile = new File(REPO_LOCATION, "master.txt");
+		assertTrue(testFile.exists());
 	}
 	
 }

@@ -41,15 +41,31 @@ package org.spearce.jgit.simple;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 import org.spearce.jgit.errors.NoRemoteRepositoryException;
+import org.spearce.jgit.errors.NotSupportedException;
+import org.spearce.jgit.errors.RevisionSyntaxException;
+import org.spearce.jgit.errors.TransportException;
+import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
+import org.spearce.jgit.lib.GitIndex;
+import org.spearce.jgit.lib.NullProgressMonitor;
+import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
+import org.spearce.jgit.lib.RefComparator;
+import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
+import org.spearce.jgit.lib.Tree;
+import org.spearce.jgit.lib.WorkDirCheckout;
+import org.spearce.jgit.transport.FetchResult;
 import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
+import org.spearce.jgit.transport.Transport;
 import org.spearce.jgit.transport.URIish;
 
 /**
@@ -62,6 +78,11 @@ public class SimpleRepository {
 	 * the Repository all the operations should work on
 	 */
 	private Repository db;
+	
+	/**
+	 * the HEAD after a fetch
+	 */
+	private Ref head;
 	
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-init
@@ -80,19 +101,23 @@ public class SimpleRepository {
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-clone
 	 * in a working directory. 
+	 * Please note that this function doesn't perform a checkout!
+	 * 
 	 * @param workdir
 	 * @param remoteName 
 	 * @param uri 
 	 * @param branch 
+	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @return the freshly cloned {@link SimpleRepository}
 	 * @throws IOException 
 	 * @throws URISyntaxException 
 	 */
-	public static SimpleRepository clone(File workdir, String remoteName, URIish uri, String branch) 
+	public static SimpleRepository clone(File workdir, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
 	throws IOException, URISyntaxException {
 		SimpleRepository repo = new SimpleRepository();
 		repo.gitInit(workdir);
-		repo.gitFetch(remoteName, uri, branch, true, null);
+		repo.gitClone(remoteName, uri, branch, true, null);
+		repo.gitFetch(remoteName, monitor);
 		return repo;
 	}
 	
@@ -111,7 +136,7 @@ public class SimpleRepository {
 	/**
 	 * A SimpleRepository may only be created with one of the factory methods.
 	 * @see #init(File)
-	 * @see #clone(File, String, URIish, String)
+	 * @see #clone(File, String, URIish, String, ProgressMonitor)
 	 * @see #wrap(Repository)
 	 */
 	private SimpleRepository() {
@@ -160,7 +185,7 @@ public class SimpleRepository {
 	}
 	
 	/**
-	 * performs the fetch of all objects from the remote repo.
+	 * Setup a clone from a remote repo.
 	 * 
 	 * @param remoteName like 'origin'
 	 * @param uri to clone from 
@@ -174,7 +199,7 @@ public class SimpleRepository {
 	 * @throws URISyntaxException 
 	 * @throws IOException 
 	 */
-	public void gitFetch(final String remoteName, final URIish uri, final String branchName, 
+	public void gitClone(final String remoteName, final URIish uri, final String branchName, 
 			final boolean allSelected, final Collection<Ref> selectedBranches) 
 	throws URISyntaxException, IOException {
 		if (branchName == null) {
@@ -185,9 +210,10 @@ public class SimpleRepository {
 		final RemoteConfig rc = new RemoteConfig(db.getConfig(), remoteName);
 		rc.addURI(uri);
 
+		final String dst = Constants.R_REMOTES + rc.getName();
 		RefSpec wcrs = new RefSpec();
 		wcrs = wcrs.setForceUpdate(true);
-		wcrs = wcrs.setSourceDestination(Constants.R_HEADS + "*", remoteName + "/*");
+		wcrs = wcrs.setSourceDestination(Constants.R_HEADS + "*", dst + "/*");
 
 		if (allSelected) {
 			rc.addFetchRefSpec(wcrs);
@@ -210,6 +236,58 @@ public class SimpleRepository {
 	}
 
 	/**
+	 * Fetch all new objects from the foreign repo
+	 * @param remoteName like 'origin'
+	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
+	 * @throws URISyntaxException 
+	 * @throws NotSupportedException 
+	 * @throws TransportException 
+	 */
+	public void gitFetch(final String remoteName, ProgressMonitor monitor) 
+	throws NotSupportedException, URISyntaxException, TransportException {
+		if (monitor == null) {
+			monitor = new NullProgressMonitor();
+		}
+		
+		final Transport tn = Transport.open(db, remoteName);
+		
+		FetchResult r;
+		try {
+			r = tn.fetch(monitor, null);
+		} finally {
+			tn.close();
+		}
+		assert r != null;
+		head = guessHEAD(r);
+		assert head != null;
+	}
+
+	/**
+	 * TODO review if we really need this!
+	 * @param result
+	 * @return HEAD 
+	 */
+	private Ref guessHEAD(final FetchResult result) {
+		final Ref idHEAD = result.getAdvertisedRef(Constants.HEAD);
+		final List<Ref> availableRefs = new ArrayList<Ref>();
+		Ref head = null;
+		for (final Ref r : result.getAdvertisedRefs()) {
+			final String n = r.getName();
+			if (!n.startsWith(Constants.R_HEADS))
+				continue;
+			availableRefs.add(r);
+			if (idHEAD == null || head != null)
+				continue;
+			if (r.getObjectId().equals(idHEAD.getObjectId()))
+				head = r;
+		}
+		Collections.sort(availableRefs, RefComparator.INSTANCE);
+		if (idHEAD != null && head == null)
+			head = idHEAD;
+		return head;
+	}
+
+	/**
 	 * @param remoteName
 	 */
 	public void gitPull(String remoteName) {
@@ -225,10 +303,40 @@ public class SimpleRepository {
 	}
 
 	/**
-	 * @param branch
+	 * @param branch or refspec, e.g. &quot;master&quot;
+	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
+	 * @throws IOException 
 	 */
-	public void gitCheckout(String branch) {
-		//X TODO
+	public void gitCheckout(String branch, ProgressMonitor monitor) throws IOException {
+		if (branch == null) {
+			throw new IllegalArgumentException("branch must not be null");
+		}
+		
+		if (monitor == null) {
+			monitor = new NullProgressMonitor();
+		}
+		
+		if (!Constants.HEAD.equals(branch)) {
+			db.writeSymref(Constants.HEAD, branch);
+		}
+		
+		Ref branchRef = head;
+		if (branchRef == null) {
+			throw new RevisionSyntaxException(branch, "cannot find branch ");
+		}
+		
+		final Commit commit = db.mapCommit(branchRef.getObjectId());
+		final RefUpdate u = db.updateRef(Constants.HEAD);
+		u.setNewObjectId(commit.getCommitId());
+		u.forceUpdate();
+
+		final GitIndex index = new GitIndex(db);
+		final Tree tree = commit.getTree();
+		final WorkDirCheckout co;
+
+		co = new WorkDirCheckout(db, db.getWorkDir(), index, tree);
+		co.checkout();
+		index.write();
 	}
 
 
