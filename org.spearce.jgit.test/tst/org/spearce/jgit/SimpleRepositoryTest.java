@@ -37,7 +37,12 @@
 
 package org.spearce.jgit;
 
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.List;
 
 import org.spearce.jgit.lib.RepositoryTestCase;
 import org.spearce.jgit.simple.SimpleRepository;
@@ -71,23 +76,39 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 	}
 	
 	public void testClone() throws Exception {
-		File repoDir = new File(REPO_LOCATION);
-		recursiveDelete(repoDir);
-		URIish uri = new URIish("file://" + trash.getAbsolutePath());
-		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
-		assertNotNull(srep);
+		cloneTestRepository();
 	}
 	
 	public void testCheckout() throws Exception {
-		File repoDir = new File(REPO_LOCATION);
-		recursiveDelete(repoDir);
-		URIish uri = new URIish("file://" + trash.getAbsolutePath());
-		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
-		assertNotNull(srep);
+		SimpleRepository srep = cloneTestRepository();
 		
 		srep.gitCheckout("master", null);
 		File testFile = new File(REPO_LOCATION, "master.txt");
 		assertTrue(testFile.exists());
 	}
+
+	public void testAdd() throws Exception {
+		SimpleRepository srep = cloneTestRepository();
+		File fileToAdd = new File(srep.getRepository().getWorkDir(), "myNewFile.txt");
+        BufferedWriter out = new BufferedWriter(new FileWriter(fileToAdd));
+        out.write("This File will be added, sic!S");
+        out.close();
+        
+        List<File> addedFiles = srep.gitAdd(fileToAdd);
+        assertNotNull(addedFiles);
+        assertEquals(1, addedFiles.size());
+	}
+
 	
+	private SimpleRepository cloneTestRepository() 
+	throws URISyntaxException, IOException {
+		File repoDir = new File(REPO_LOCATION);
+		recursiveDelete(repoDir);
+		URIish uri = new URIish("file://" + trash.getAbsolutePath());
+		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
+		assertNotNull(srep);
+		return srep;
+	}
+
+
 }
