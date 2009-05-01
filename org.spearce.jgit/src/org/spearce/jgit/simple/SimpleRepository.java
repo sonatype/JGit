@@ -43,7 +43,9 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import org.spearce.jgit.errors.NoRemoteRepositoryException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
@@ -61,6 +63,7 @@ import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
 import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.GitIndex.Entry;
+import org.spearce.jgit.lib.RefUpdate.Result;
 import org.spearce.jgit.transport.FetchResult;
 import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
@@ -77,13 +80,7 @@ public class SimpleRepository {
 	 * the Repository all the operations should work on
 	 */
 	private Repository db;
-	
-	/**
-	 * the HEAD after a fetch
-	 * @deprecated since this should be detected on the fly!
-	 */
-	//X private Ref currentHead;
-	
+
 	/**
 	 * handle all ignore rules for this repository
 	 */
@@ -99,7 +96,7 @@ public class SimpleRepository {
 	public static SimpleRepository init(File workdir) 
 	throws IOException {
 		SimpleRepository repo = new SimpleRepository();
-		repo.gitInit(workdir);
+		repo.initRepository(workdir, ".git");
 		return repo;
 	}
 	
@@ -120,9 +117,9 @@ public class SimpleRepository {
 	public static SimpleRepository clone(File workdir, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
 	throws IOException, URISyntaxException {
 		SimpleRepository repo = new SimpleRepository();
-		repo.gitInit(workdir);
-		repo.gitClone(remoteName, uri, branch, true, null);
-		repo.gitFetch(remoteName, monitor);
+		repo.initRepository(workdir, ".git");
+		repo.addRemote(remoteName, uri, branch, true, null);
+		repo.fetch(uri, null);
 		return repo;
 	}
 	
@@ -161,25 +158,14 @@ public class SimpleRepository {
 	public void close() {
 		db.close();
 	}
-
 	
-	/**
-	 * Init a fresh local .git {@code Repository}
-	 * @param workdir for the repository
-	 * @throws IOException 
-	 */
-	public void gitInit(File workdir) 
-	throws IOException {
-		gitInit(workdir, ".git");
-	}
-
 	/**
 	 * Init a freshl local {@code Repository} int the gitDir
 	 * @param workdir for the repository
 	 * @param gitDir usually <code>.git</code>
 	 * @throws IOException 
 	 */
-	public void gitInit(File workdir, String gitDir) 
+	private void initRepository(File workdir, String gitDir) 
 	throws IOException {
 		final File repoDir = new File(workdir, gitDir);
 		db = new Repository(repoDir);
@@ -192,7 +178,7 @@ public class SimpleRepository {
 	}
 	
 	/**
-	 * Setup a clone from a remote repo.
+	 * Setup a new remote reference.
 	 * 
 	 * @param remoteName like 'origin'
 	 * @param uri to clone from 
@@ -206,8 +192,8 @@ public class SimpleRepository {
 	 * @throws URISyntaxException 
 	 * @throws IOException 
 	 */
-	public void gitClone(final String remoteName, final URIish uri, final String branchName, 
-			final boolean allSelected, final Collection<Ref> selectedBranches) 
+	public void addRemote(final String remoteName, final URIish uri, final String branchName, 
+			              final boolean allSelected, final Collection<Ref> selectedBranches) 
 	throws URISyntaxException, IOException {
 		if (branchName == null) {
 			throw new NoRemoteRepositoryException(uri, "cannot checkout; no HEAD advertised by remote");
@@ -231,7 +217,6 @@ public class SimpleRepository {
 		}
 
 		rc.update(db.getConfig());
-		db.getConfig().save();
 
 		// setup the default remote branch for branchName
 		db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
@@ -243,14 +228,31 @@ public class SimpleRepository {
 	}
 
 	/**
-	 * Fetch all new objects from the foreign repo.
+	 * Fetch all new objects from the given branches/tags (want) 
+	 * from the foreign uri.
 	 * 
-	 * @param remoteName like 'origin'
+	 * @param uri either a foreign git uri 
+	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
+	 * @throws IOException 
+	 * @throws URISyntaxException 
+	 */
+	  public void fetch(final URIish uri, ProgressMonitor monitor) 
+	  throws URISyntaxException, IOException {
+		Set<String> want = Collections.emptySet();
+	    fetch(uri, want, monitor);
+	  }
+	  
+	/**
+	 * Fetch all new objects from the given branches/tags (want) 
+	 * from the foreign uri.
+	 * 
+	 * @param uri either a foreign git uri 
+	 * @param want Set of branches, tags, etc which should be fetched
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws URISyntaxException 
 	 * @throws IOException 
 	 */
-	public void gitFetch(final String remoteName, ProgressMonitor monitor) 
+	public void fetch(final URIish uri, Set<String> want, ProgressMonitor monitor) 
 	throws URISyntaxException, IOException {
 		if (monitor == null) {
 			monitor = new NullProgressMonitor();
@@ -258,7 +260,8 @@ public class SimpleRepository {
 		
 		String currentBranchName = db.getBranch();
 		
-		final Transport tn = Transport.open(db, remoteName);
+		//X TODO this should finally use Transport.open(db, uri); but this balls out currently! 
+		final Transport tn = Transport.open(db, "origin");
 		
 		FetchResult fetchResult;
 		try {
@@ -271,18 +274,15 @@ public class SimpleRepository {
 			return;
 		}
 
-		// now write the HEAD Ref!
-		RefUpdate u = db.updateRef(Constants.HEAD);
-		u.setNewObjectId(head.getObjectId());
-		u.forceUpdate();
-		
-		//additionally write write /refs/heads/[branchname]  
+		//now add the Ref for /refs/heads/[branchname]  
 		RefUpdate uMaster = db.updateRef(Constants.R_HEADS + currentBranchName);
 		uMaster.setNewObjectId(head.getObjectId());
-		uMaster.forceUpdate();
+		Result result = uMaster.forceUpdate();
+		
+		//X TODO REMOVE DEBUGGING OUTPUT!
+		System.out.println("updateRef " + uMaster + " returned Resulr=" + result);
 		
 		//X TODO Shawn, how can I write it to the disk? After the checkout I am missing /refs/heads/master 
-		
 	}
 
 
@@ -291,7 +291,7 @@ public class SimpleRepository {
 	 * into the actual HEAD. 
 	 * @param remoteName
 	 */
-	public void gitPull(String remoteName) {
+	public void pull(String remoteName) {
 		//X TODO
 	}
 	
@@ -301,7 +301,7 @@ public class SimpleRepository {
 	 * @param uri
 	 * @param branch
 	 */
-	public void gitPull(URIish uri, String branch) {
+	public void pull(URIish uri, String branch) {
 		//X TODO
 	}
 
@@ -313,7 +313,7 @@ public class SimpleRepository {
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws IOException 
 	 */
-	public void gitCheckout(String branchName, ProgressMonitor monitor) throws IOException {
+	public void checkout(String branchName, ProgressMonitor monitor) throws IOException {
 		if (branchName == null) {
 			throw new IllegalArgumentException("branch must not be null");
 		}
@@ -354,7 +354,7 @@ public class SimpleRepository {
 	 * @return a List with all added files
 	 * @throws Exception
 	 */
-	public List<File> gitAdd(File toAdd) 
+	public List<File> add(File toAdd) 
 	throws Exception {
 		List<File> addedFiles = new ArrayList<File>();
 		
@@ -379,7 +379,7 @@ public class SimpleRepository {
 		if (toAdd.isDirectory()) {
 			for(File f : toAdd.listFiles()) {
 				// recursively add files
-				addedFiles.addAll(gitAdd(f));
+				addedFiles.addAll(add(f));
 			}
 		} else {
 			Entry entry = index.getEntry(repoPath);

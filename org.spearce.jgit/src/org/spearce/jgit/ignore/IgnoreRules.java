@@ -53,7 +53,30 @@ import org.spearce.jgit.lib.Repository;
  */
 public class IgnoreRules {
 	
+	/**
+	 * The Repository the ignores are for.
+	 */
 	private Repository db;
+	
+	/**
+	 * These constants define the locations where ignore rules should be placed.
+	 */
+	public static enum IgnoreLocation{
+		/** 
+		 * the .gitignore file is in the projects root directory 
+		 */
+	    ROOTDIR,
+	    
+		/** 
+		 * the .gitignore file resides in the current directory directory 
+		 */
+	    CURRENTDIR,
+	    
+		/** 
+		 * the gitignore rules in .git/info/exclude 
+		 */
+	    INFOEXCLUDES
+	 } 
 	
 	/**
 	 * @param db
@@ -85,6 +108,27 @@ public class IgnoreRules {
 		return false;
 	}
 
+	/**
+	 * Add an ignore entry for the given file or directory.
+	 * The location defines on which level the ignore rule should be applied.
+	 * @param location
+	 * @param toIgnore
+	 */
+	public void addIgnore(IgnoreLocation location, File toIgnore) {
+		//X TODO
+	}
+
+	/**
+	 * Add an general ignore rule entry.
+	 * The location defines on which level the ignore rule should be applied.
+	 * @param location
+	 * @param ignoreRule
+	 */
+	public void addIgnore(IgnoreLocation location, String ignoreRule) {
+		//X TODO
+	}
+
+	
 	/**
 	 * Check for all .gitignore files along the path until
 	 * up to the root directory of this very repository
@@ -186,6 +230,9 @@ public class IgnoreRules {
 		// invert the search
 		if (pattern.startsWith("!")) {
 			matchResult = false;
+			
+			// cut off the '!'
+			pattern = pattern.substring(1);
 		}
 		
 		// check for absolute paths
