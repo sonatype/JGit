@@ -189,6 +189,7 @@ public class IgnoreRules {
 		}
 		
 		// check for absolute paths
+		//X TODO this currently doesn't support wildcards!
 		if (pattern.startsWith("/") && pattern.length() > 1) {
 			if (toCheckFor.equals(new File(currentDir, pattern.substring(1)))) {
 				return matchResult;
@@ -198,6 +199,7 @@ public class IgnoreRules {
 				return matchResult;
 			}
 		}
+	
 		
 		//X TODO there are  possibly still a few matching rules missing!
 		return false;
