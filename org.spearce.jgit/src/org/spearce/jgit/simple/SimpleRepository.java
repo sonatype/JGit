@@ -43,21 +43,18 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 import org.spearce.jgit.errors.NoRemoteRepositoryException;
-import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
-import org.spearce.jgit.errors.TransportException;
 import org.spearce.jgit.ignore.IgnoreRules;
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.GitIndex;
 import org.spearce.jgit.lib.NullProgressMonitor;
+import org.spearce.jgit.lib.ObjectId;
 import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
-import org.spearce.jgit.lib.RefComparator;
 import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
@@ -83,8 +80,9 @@ public class SimpleRepository {
 	
 	/**
 	 * the HEAD after a fetch
+	 * @deprecated since this should be detected on the fly!
 	 */
-	private Ref currentHead;
+	//X private Ref currentHead;
 	
 	/**
 	 * handle all ignore rules for this repository
@@ -246,60 +244,51 @@ public class SimpleRepository {
 
 	/**
 	 * Fetch all new objects from the foreign repo.
-	 * This function also sets the {@code #currentHead}
 	 * 
 	 * @param remoteName like 'origin'
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws URISyntaxException 
-	 * @throws NotSupportedException 
-	 * @throws TransportException 
+	 * @throws IOException 
 	 */
 	public void gitFetch(final String remoteName, ProgressMonitor monitor) 
-	throws NotSupportedException, URISyntaxException, TransportException {
+	throws URISyntaxException, IOException {
 		if (monitor == null) {
 			monitor = new NullProgressMonitor();
 		}
 		
+		String currentBranchName = db.getBranch();
+		
 		final Transport tn = Transport.open(db, remoteName);
 		
-		FetchResult r;
+		FetchResult fetchResult;
 		try {
-			r = tn.fetch(monitor, null);
+			fetchResult = tn.fetch(monitor, null);
 		} finally {
 			tn.close();
 		}
-		assert r != null;
-		currentHead = guessHEAD(r);
-		assert currentHead != null;
-	}
-
-	/**
-	 * Guess the HEAD Ref from the given FetchResult
-	 * TODO review if we really need this! 
-	 * @param result
-	 * @return HEAD 
-	 */
-	private Ref guessHEAD(final FetchResult result) {
-		final Ref idHEAD = result.getAdvertisedRef(Constants.HEAD);
-		final List<Ref> availableRefs = new ArrayList<Ref>();
-		Ref head = null;
-		for (final Ref r : result.getAdvertisedRefs()) {
-			final String n = r.getName();
-			if (!n.startsWith(Constants.R_HEADS))
-				continue;
-			availableRefs.add(r);
-			if (idHEAD == null || head != null)
-				continue;
-			if (r.getObjectId().equals(idHEAD.getObjectId()))
-				head = r;
+		final Ref head = fetchResult.getAdvertisedRef(Constants.HEAD);
+		if (head == null || head.getObjectId() == null) {
+			return;
 		}
-		Collections.sort(availableRefs, RefComparator.INSTANCE);
-		if (idHEAD != null && head == null)
-			head = idHEAD;
-		return head;
+
+		// now write the HEAD Ref!
+		RefUpdate u = db.updateRef(Constants.HEAD);
+		u.setNewObjectId(head.getObjectId());
+		u.forceUpdate();
+		
+		//additionally write write /refs/heads/[branchname]  
+		RefUpdate uMaster = db.updateRef(Constants.R_HEADS + currentBranchName);
+		uMaster.setNewObjectId(head.getObjectId());
+		uMaster.forceUpdate();
+		
+		//X TODO Shawn, how can I write it to the disk? After the checkout I am missing /refs/heads/master 
+		
 	}
 
+
 	/**
+	 * Fetch the current branch from the given remoteName and merge the changes
+	 * into the actual HEAD. 
 	 * @param remoteName
 	 */
 	public void gitPull(String remoteName) {
@@ -307,6 +296,8 @@ public class SimpleRepository {
 	}
 	
 	/**
+	 * Fetch the indicated branch from the given remoteName and merge the changes
+	 * into the actual HEAD. 
 	 * @param uri
 	 * @param branch
 	 */
@@ -315,12 +306,15 @@ public class SimpleRepository {
 	}
 
 	/**
-	 * @param branch or refspec, e.g. &quot;master&quot;
+	 * Checkout the given branch from the local repository.
+	 * This command makes no remote connections!
+	 * 
+	 * @param branchName or refspec, e.g. &quot;master&quot;
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws IOException 
 	 */
-	public void gitCheckout(String branch, ProgressMonitor monitor) throws IOException {
-		if (branch == null) {
+	public void gitCheckout(String branchName, ProgressMonitor monitor) throws IOException {
+		if (branchName == null) {
 			throw new IllegalArgumentException("branch must not be null");
 		}
 		
@@ -328,16 +322,19 @@ public class SimpleRepository {
 			monitor = new NullProgressMonitor();
 		}
 		
+		/*X Shawn, please review this!
 		if (!Constants.HEAD.equals(branch)) {
 			db.writeSymref(Constants.HEAD, branch);
 		}
+		*/
 		
-		Ref branchRef = currentHead;
-		if (branchRef == null) {
-			throw new RevisionSyntaxException(branch, "cannot find branch ");
+		ObjectId headId = db.resolve(Constants.R_HEADS + branchName);
+
+		if (headId == null) {
+			throw new RevisionSyntaxException(branchName, "cannot find head of branch ");
 		}
 		
-		final Commit commit = db.mapCommit(branchRef.getObjectId());
+		final Commit commit = db.mapCommit(headId);
 		final RefUpdate u = db.updateRef(Constants.HEAD);
 		u.setNewObjectId(commit.getCommitId());
 		u.forceUpdate();
