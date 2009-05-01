@@ -82,7 +82,7 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 	public void testCheckout() throws Exception {
 		SimpleRepository srep = cloneTestRepository();
 		
-		srep.gitCheckout("master", null);
+		srep.checkout("master", null);
 		File testFile = new File(REPO_LOCATION, "master.txt");
 		assertTrue(testFile.exists());
 	}
@@ -94,7 +94,7 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
         out.write("This File will be added, sic!S");
         out.close();
         
-        List<File> addedFiles = srep.gitAdd(fileToAdd);
+        List<File> addedFiles = srep.add(fileToAdd);
         assertNotNull(addedFiles);
         assertEquals(1, addedFiles.size());
 	}
