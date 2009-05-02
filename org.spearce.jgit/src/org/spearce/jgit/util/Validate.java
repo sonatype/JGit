@@ -37,6 +37,7 @@
 
 package org.spearce.jgit.util;
 
+import java.text.MessageFormat;
 import java.util.Collection;
 import java.util.Map;
 
@@ -58,7 +59,8 @@ import java.util.Map;
  * When using a message string, all parameters would have to be string concatenated
  * before the call, even if no problem arises which would cost performance.</br>
  * Instead of this, we will concatenate (with spaces) all given msgObjects.toString() 
- * only in case of a failed validation!</p>
+ * only in case of a failed validation! If the first parameter of the msgObject is a
+ * String, it will be taken as the format string for {@code MessageFormat}.</p>
  * 
  * <h3>Examples:</h3>
  * <p>
@@ -77,10 +79,18 @@ import java.util.Map;
  * <pre>
  * public void myFn(String argString, Integer argInt) {
  *     Validate.notNull(argInt, "Integer parameter must be set);
- *     Validate.isTrue(argInt.intValue > 3, "Integer parameter must be <=3 but actually is", argInt);
+ *     Validate.isTrue(argInt.intValue > 3, "Integer parameter must be <=3!");
  * }
  * </pre>
  * <p>
+ * 
+ * <p>
+ * If the first parameter of the msgObject is a String {@code MessageFormat} will be used:
+ * <pre>
+ *     Validate.isTrue(argInt.intValue > 3, "Integer parameter actually is {0} but must be <=3 !", argInt);
+ * </pre>
+ * </p>
+ * @see MessageFormat
  */
 public class Validate {
 
@@ -232,16 +242,30 @@ public class Validate {
 	
 	/**
 	 * private helper function to create an error message from the given Objects
+	 * If the first object in msgObjects is of type {@code String} then 
+	 * {@code MessageFormat} will be used to format the output message.
+	 * 
 	 * @param msgObjects
 	 * @return concatenated String representation of all the objects
 	 */
 	private static String getMessage(Object... msgObjects) {
-		StringBuffer sb = new StringBuffer("Validation failed: [");
-		for(Object msgPart : msgObjects) {
-			sb.append(' ').append(msgPart);
+		if (msgObjects.length > 0 && msgObjects[0] instanceof String) {
+			MessageFormat form = new MessageFormat((String) msgObjects[0]);
+			Object[] params = new Object[msgObjects.length - 1];
+			System.arraycopy(msgObjects, 1, params, 0, msgObjects.length - 1);
+			return form.format(params);
 		}
-		sb.append(']');
-		return sb.toString();
+		else {
+			StringBuffer sb = new StringBuffer("Validation failed: [");
+			for(int i = 0; i < msgObjects.length; i++) {
+				if (i > 0) {
+					sb.append(' ');
+				}
+				sb.append(msgObjects[i]);
+			}
+			sb.append(']');
+			return sb.toString();
+		}
 	}
 
 }
