@@ -69,6 +69,7 @@ import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
 import org.spearce.jgit.transport.Transport;
 import org.spearce.jgit.transport.URIish;
+import org.spearce.jgit.util.Validate;
 
 /**
  * High level operations to work with a {@code Repository}
@@ -95,8 +96,35 @@ public class SimpleRepository {
 	 */
 	public static SimpleRepository init(File workdir) 
 	throws IOException {
+		Validate.notNull(workdir, "workdir must not be null!");
 		SimpleRepository repo = new SimpleRepository();
 		repo.initRepository(workdir, ".git");
+		return repo;
+	}
+	
+	/**
+	 * Create a SimpleRepository for an already existing local git 
+	 * repository structure.
+	 * 
+	 * @param workdir the directory with the existing git repository 
+	 * @return {@link SimpleRepository} or <code>null</code> if the given workdir doesn't contain a git repository
+	 * @throws Exception 
+	 */
+	public static SimpleRepository existing(File workdir)
+	throws Exception {
+		Validate.notNull(workdir, "workdir must not be null!");
+		Validate.isTrue(workdir.exists(), "The workdir {0} doesn't exist!", workdir);
+		
+		final File repoDir = new File(workdir, ".git");
+		if (!repoDir.exists()) {
+			return null;
+		}
+		
+		SimpleRepository repo = new SimpleRepository();
+
+		repo.db = new Repository(repoDir);
+		repo.ignores = new IgnoreRules(repo.db);
+
 		return repo;
 	}
 	
