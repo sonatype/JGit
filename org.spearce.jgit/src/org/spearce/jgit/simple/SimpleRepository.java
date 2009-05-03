@@ -47,8 +47,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
-import org.spearce.jgit.errors.NoRemoteRepositoryException;
+import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
+import org.spearce.jgit.errors.TransportException;
 import org.spearce.jgit.ignore.IgnoreRules;
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
@@ -57,6 +58,7 @@ import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
 import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
+import org.spearce.jgit.lib.RefComparator;
 import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
@@ -90,15 +92,15 @@ public class SimpleRepository {
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-init
 	 * in a working directory. 
-	 * @param workdir
+	 * @param repoName name of the repository
 	 * @return the freshly initialised {@link SimpleRepository}
 	 * @throws IOException 
 	 */
-	public static SimpleRepository init(File workdir) 
+	public static SimpleRepository init(String repoName) 
 	throws IOException {
-		Validate.notNull(workdir, "workdir must not be null!");
+		Validate.notNull(repoName, "workdir must not be null!");
 		SimpleRepository repo = new SimpleRepository();
-		repo.initRepository(workdir, ".git");
+		repo.initRepository(repoName, ".git");
 		return repo;
 	}
 	
@@ -106,16 +108,15 @@ public class SimpleRepository {
 	 * Create a SimpleRepository for an already existing local git 
 	 * repository structure.
 	 * 
-	 * @param workdir the directory with the existing git repository 
-	 * @return {@link SimpleRepository} or <code>null</code> if the given workdir doesn't contain a git repository
+	 * @param repoName name of the existing git repository 
+	 * @return {@link SimpleRepository} or <code>null</code> if the given repoName doesn't contain a git repository
 	 * @throws Exception 
 	 */
-	public static SimpleRepository existing(File workdir)
+	public static SimpleRepository existing(String repoName)
 	throws Exception {
-		Validate.notNull(workdir, "workdir must not be null!");
-		Validate.isTrue(workdir.exists(), "The workdir {0} doesn't exist!", workdir);
+		Validate.notNull(repoName, "workdir must not be null!");
 		
-		final File repoDir = new File(workdir, ".git");
+		final File repoDir = new File(repoName, ".git");
 		if (!repoDir.exists()) {
 			return null;
 		}
@@ -130,10 +131,9 @@ public class SimpleRepository {
 	
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-clone
-	 * in a working directory. 
-	 * Please note that this function doesn't perform a checkout!
+	 * in a working directory. This will also checkout the content.  
 	 * 
-	 * @param workdir
+	 * @param repoName
 	 * @param remoteName 
 	 * @param uri 
 	 * @param branch 
@@ -142,12 +142,18 @@ public class SimpleRepository {
 	 * @throws IOException 
 	 * @throws URISyntaxException 
 	 */
-	public static SimpleRepository clone(File workdir, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
+	public static SimpleRepository clone(String repoName, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
 	throws IOException, URISyntaxException {
 		SimpleRepository repo = new SimpleRepository();
-		repo.initRepository(workdir, ".git");
+		repo.initRepository(repoName, ".git");
+		
+		if (monitor == null) {
+			monitor = new NullProgressMonitor();
+		}
+
 		repo.addRemote(remoteName, uri, branch, true, null);
-		repo.fetch(uri, null);
+		Ref head = repo.fetch(remoteName, monitor);
+		repo.checkout(head.getObjectId(), head.getName());
 		return repo;
 	}
 	
@@ -165,8 +171,8 @@ public class SimpleRepository {
 
 	/**
 	 * A SimpleRepository may only be created with one of the factory methods.
-	 * @see #init(File)
-	 * @see #clone(File, String, URIish, String, ProgressMonitor)
+	 * @see #init(String)
+	 * @see #clone(String, String, URIish, String, ProgressMonitor)
 	 * @see #wrap(Repository)
 	 */
 	private SimpleRepository() {
@@ -189,13 +195,13 @@ public class SimpleRepository {
 	
 	/**
 	 * Init a freshl local {@code Repository} int the gitDir
-	 * @param workdir for the repository
+	 * @param repoName of the repository
 	 * @param gitDir usually <code>.git</code>
 	 * @throws IOException 
 	 */
-	private void initRepository(File workdir, String gitDir) 
+	private void initRepository(String repoName, String gitDir) 
 	throws IOException {
-		final File repoDir = new File(workdir, gitDir);
+		final File repoDir = new File(repoName, gitDir);
 		db = new Repository(repoDir);
 		db.create();
 
@@ -223,9 +229,7 @@ public class SimpleRepository {
 	public void addRemote(final String remoteName, final URIish uri, final String branchName, 
 			              final boolean allSelected, final Collection<Ref> selectedBranches) 
 	throws URISyntaxException, IOException {
-		if (branchName == null) {
-			throw new NoRemoteRepositoryException(uri, "cannot checkout; no HEAD advertised by remote");
-		}
+		Validate.notNull(branchName, "cannot checkout; no HEAD advertised by remote {0}", uri);
 		
 		// add remote configuration
 		final RemoteConfig rc = new RemoteConfig(db.getConfig(), remoteName);
@@ -245,6 +249,7 @@ public class SimpleRepository {
 		}
 
 		rc.update(db.getConfig());
+		db.getConfig().save();
 
 		// setup the default remote branch for branchName
 		db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
@@ -286,10 +291,7 @@ public class SimpleRepository {
 			monitor = new NullProgressMonitor();
 		}
 		
-		String currentBranchName = db.getBranch();
-		
-		//X TODO this should finally use Transport.open(db, uri); but this balls out currently! 
-		final Transport tn = Transport.open(db, "origin");
+		final Transport tn = Transport.open(db, uri);
 		
 		FetchResult fetchResult;
 		try {
@@ -301,19 +303,9 @@ public class SimpleRepository {
 		if (head == null || head.getObjectId() == null) {
 			return;
 		}
-
-		//now add the Ref for /refs/heads/[branchname]  
-		RefUpdate uMaster = db.updateRef(Constants.R_HEADS + currentBranchName);
-		uMaster.setNewObjectId(head.getObjectId());
-		Result result = uMaster.forceUpdate();
-		
-		//X TODO REMOVE DEBUGGING OUTPUT!
-		System.out.println("updateRef " + uMaster + " returned Resulr=" + result);
-		
-		//X TODO Shawn, how can I write it to the disk? After the checkout I am missing /refs/heads/master 
 	}
 
-
+	
 	/**
 	 * Fetch the current branch from the given remoteName and merge the changes
 	 * into the actual HEAD. 
@@ -342,39 +334,21 @@ public class SimpleRepository {
 	 * @throws IOException 
 	 */
 	public void checkout(String branchName, ProgressMonitor monitor) throws IOException {
-		if (branchName == null) {
-			throw new IllegalArgumentException("branch must not be null");
+		Validate.notNull(branchName, "branch must not be null");
+		
+		if (!Constants.HEAD.equals(branchName)) {
+			db.writeSymref(Constants.HEAD, branchName);
 		}
 		
-		if (monitor == null) {
-			monitor = new NullProgressMonitor();
-		}
-		
-		/*X Shawn, please review this!
-		if (!Constants.HEAD.equals(branch)) {
-			db.writeSymref(Constants.HEAD, branch);
-		}
-		*/
-		
-		ObjectId headId = db.resolve(Constants.R_HEADS + branchName);
+		ObjectId headId = db.resolve(branchName);
 
 		if (headId == null) {
 			throw new RevisionSyntaxException(branchName, "cannot find head of branch ");
 		}
 		
-		final Commit commit = db.mapCommit(headId);
-		final RefUpdate u = db.updateRef(Constants.HEAD);
-		u.setNewObjectId(commit.getCommitId());
-		u.forceUpdate();
-
-		final GitIndex index = new GitIndex(db);
-		final Tree tree = commit.getTree();
-		final WorkDirCheckout co;
-
-		co = new WorkDirCheckout(db, db.getWorkDir(), index, tree);
-		co.checkout();
-		index.write();
+		checkout(headId, branchName);
 	}
+
 
 	/**
 	 * Add a given file or directory to the index.
@@ -429,5 +403,80 @@ public class SimpleRepository {
 		
 		return addedFiles;
 	}
+
+	/**
+	 * Fetch from the given remote and try to detect the advertised head.
+	 * This function is used by {@code #clone(File, String, URIish, String, ProgressMonitor)} 
+	 * @param remoteName
+	 * @param monitor
+	 * @return Ref with the detected head
+	 * @throws NotSupportedException
+	 * @throws URISyntaxException
+	 * @throws TransportException
+	 */
+	private Ref fetch(final String remoteName, ProgressMonitor monitor) 
+	throws NotSupportedException, URISyntaxException, TransportException {
+		final Transport tn = Transport.open(db, remoteName);
+		
+		FetchResult fetchResult;
+		try {
+			fetchResult = tn.fetch(monitor, null);
+		} finally {
+			tn.close();
+		}
+		return guessHEAD(fetchResult);
+	}
 	
+	/**
+	 * guess the head from the advertised Ref of the FetchResult
+	 * @param result
+	 * @return Ref with the detected head
+	 */
+	private Ref guessHEAD(final FetchResult result) {
+		final Ref idHEAD = result.getAdvertisedRef(Constants.HEAD);
+		final List<Ref> availableRefs = new ArrayList<Ref>();
+		Ref head = null;
+		for (final Ref r : result.getAdvertisedRefs()) {
+			final String n = r.getName();
+			if (!n.startsWith(Constants.R_HEADS))
+				continue;
+			availableRefs.add(r);
+			if (idHEAD == null || head != null)
+				continue;
+			if (r.getObjectId().equals(idHEAD.getObjectId()))
+				head = r;
+		}
+		Collections.sort(availableRefs, RefComparator.INSTANCE);
+		if (idHEAD != null && head == null)
+			head = idHEAD;
+		return head;
+	}
+
+	/**
+	 * Checkout the headId into the working directory
+	 * @param headId
+	 * @param branch internal branch name, e.g. refs/heads/master
+	 * @throws IOException
+	 */
+	private void checkout(ObjectId headId, String branch) throws IOException {
+		if (!Constants.HEAD.equals(branch))
+			db.writeSymref(Constants.HEAD, branch);
+
+		final Commit commit = db.mapCommit(headId);
+		final RefUpdate u = db.updateRef(Constants.HEAD);
+		u.setNewObjectId(commit.getCommitId());
+		Result result = u.forceUpdate();
+		
+		//X TODO REMOVE DEBUGGING OUTPUT!
+		System.out.println("updateRef " + u + " returned Result=" + result);
+
+		final GitIndex index = new GitIndex(db);
+		final Tree tree = commit.getTree();
+		final WorkDirCheckout co;
+
+		co = new WorkDirCheckout(db, db.getWorkDir(), index, tree);
+		co.checkout();
+		index.write();
+	}
+
 }

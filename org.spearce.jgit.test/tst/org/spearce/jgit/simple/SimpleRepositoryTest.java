@@ -53,7 +53,7 @@ import org.spearce.jgit.transport.URIish;
  */
 public class SimpleRepositoryTest extends RepositoryTestCase {
 
-	private static final String REPO_LOCATION = "trash/simpleRepo/";
+	private static final String REPO_NAME = "trashRepo";
 	@Override
 	public void setUp() throws Exception {
 		super.setUp();
@@ -61,16 +61,16 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 
 	@Override
 	protected void tearDown() throws Exception {
-		File repoDir = new File(REPO_LOCATION);
+		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
 
 		super.tearDown();
 	}
 
 	public void testInit() throws Exception {
-		File repoDir = new File(REPO_LOCATION);
+		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
-		SimpleRepository srep = SimpleRepository.init(repoDir);
+		SimpleRepository srep = SimpleRepository.init(REPO_NAME);
 		assertNotNull(srep);
 		assertTrue(repoDir.exists());
 	}
@@ -80,14 +80,14 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 	 * @throws Exception 
 	 */
 	public void testExistingRepo() throws Exception {
-		File repoDir = new File(REPO_LOCATION);
+		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
 		
 		// create an initial repo
 		cloneTestRepository();
 		
 		// and now setup SimpleRepository for an existing .git repo
-		SimpleRepository srep = SimpleRepository.existing(repoDir);
+		SimpleRepository srep = SimpleRepository.existing(REPO_NAME);
 		assertNotNull(srep);
 		assertTrue(repoDir.exists());
 		
@@ -95,13 +95,15 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 
 	public void testClone() throws Exception {
 		cloneTestRepository();
+		File testFile = new File(REPO_NAME, "master.txt");
+		assertTrue(testFile.exists());
 	}
 	
 	public void testCheckout() throws Exception {
 		SimpleRepository srep = cloneTestRepository();
 		
-		srep.checkout("master", null);
-		File testFile = new File(REPO_LOCATION, "master.txt");
+		srep.checkout("A", null);
+		File testFile = new File(REPO_NAME, "master.txt");
 		assertTrue(testFile.exists());
 	}
 
@@ -120,10 +122,10 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 	
 	private SimpleRepository cloneTestRepository() 
 	throws URISyntaxException, IOException {
-		File repoDir = new File(REPO_LOCATION);
+		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
 		URIish uri = new URIish("file://" + trash.getAbsolutePath());
-		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
+		SimpleRepository srep = SimpleRepository.clone(REPO_NAME, "origin", uri, "master", null);
 		assertNotNull(srep);
 		return srep;
 	}
