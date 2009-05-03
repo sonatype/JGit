@@ -49,12 +49,17 @@ import java.util.Map;
  * All validate functions will throw an {@code IllegalArgumentException}
  * if the validation fails.
  * 
- * All validate functions exist twice. 
+ * All validate functions exist in 3 variants: 
  * 
  * <p>1st function with only the validation option</p>
  * 
- * <p>For each validation function a similar 2nd validation function exists
- * with a list of additional message parameters as Objects in elipsis form. 
+ * <p>2nd function with an additional String message parameter. This should
+ * be used only if no additional parameters have to be provided. Instead of using
+ * String operations to create the message String, the following 3rd variant 
+ * should be used.</p>
+ * 
+ * <p>For each validation function a similar 3rd validation function exists
+ * with a list of additional message parameters as Objects in ellipsis form. 
  * This is used instead of simply passing a message String due to performance reasons!
  * When using a message string, all parameters would have to be string concatenated
  * before the call, even if no problem arises which would cost performance.</br>
@@ -116,6 +121,18 @@ public class Validate {
 	 * Validate that o is not <code>null</code>
 	 * 
 	 * @param o Object to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void notNull(Object o, String msg) {
+		if (o == null) {
+			throw new IllegalArgumentException(msg);
+		}
+	}	
+
+	/**
+	 * Validate that o is not <code>null</code>
+	 * 
+	 * @param o Object to validate
 	 * @param msgObjects additional Objects added as text message to the InvalidArgumentException
 	 */
 	public static void notNull(Object o, Object... msgObjects) {
@@ -134,7 +151,19 @@ public class Validate {
 			throw new IllegalArgumentException();
 		}
 	}
-	
+
+	/**
+	 * Validate that b is <code>true</code>
+	 * 
+	 * @param b boolean to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void isTrue(boolean b, String msg) {
+		if (!b) {
+			throw new IllegalArgumentException(msg);
+		}
+	}
+
 	/**
 	 * Validate that b is <code>true</code>
 	 * 
@@ -162,6 +191,18 @@ public class Validate {
 	 * Validate that the given String is not <code>null</code> and is not empty.
 	 * 
 	 * @param string the array to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void notEmpty(String string, String msg) {
+		if (string == null || string.length() == 0) {
+			throw new IllegalArgumentException(msg);
+		}
+	}
+
+	/**
+	 * Validate that the given String is not <code>null</code> and is not empty.
+	 * 
+	 * @param string the array to validate
 	 * @param msgObjects additional Objects added as text message to the InvalidArgumentException
 	 */
 	public static void notEmpty(String string, Object... msgObjects) {
@@ -178,6 +219,18 @@ public class Validate {
 	public static void notEmpty(Object[] arr) {
 		if (arr == null || arr.length == 0) {
 			throw new IllegalArgumentException("The validated Object arrray is empty!");
+		}
+	}
+	
+	/**
+	 * Validate that arr is not <code>null</code> and is not empty.
+	 * 
+	 * @param arr the array to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void notEmpty(Object[] arr, String msg) {
+		if (arr == null || arr.length == 0) {
+			throw new IllegalArgumentException(msg);
 		}
 	}
 	
@@ -208,6 +261,18 @@ public class Validate {
 	 * Validate that the given Collection is not <code>null</code> and is not empty.
 	 * 
 	 * @param coll the Collection to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void notEmpty(Collection coll, String msg) {
+		if (coll == null || coll.isEmpty()) {
+			throw new IllegalArgumentException(msg);
+		}
+	}
+	
+	/**
+	 * Validate that the given Collection is not <code>null</code> and is not empty.
+	 * 
+	 * @param coll the Collection to validate
 	 * @param msgObjects additional Objects added as text message to the InvalidArgumentException
 	 */
 	public static void notEmpty(Collection coll, Object... msgObjects) {
@@ -224,6 +289,18 @@ public class Validate {
 	public static void notEmpty(Map map) {
 		if (map == null || map.isEmpty()) {
 			throw new IllegalArgumentException("The validated Map is empty!");
+		}
+	}
+	
+	/**
+	 * Validate that the given Map is not <code>null</code> and is not empty.
+	 * 
+	 * @param map the Map to validate
+	 * @param msg text message to the InvalidArgumentException
+	 */
+	public static void notEmpty(Map map, String msg) {
+		if (map == null || map.isEmpty()) {
+			throw new IllegalArgumentException(msg);
 		}
 	}
 	
