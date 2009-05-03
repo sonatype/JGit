@@ -92,12 +92,12 @@ public class ValidateTest extends TestCase {
 	public void testNotNullWithMessageFormatParam() {		
 		try {
 			Integer nullInt = null;
-			Validate.notNull(nullInt, "testMessageText Integer={0} btw!", new Integer(42));
+			Validate.notNull(nullInt, "testMessageText Integer={0} btw! and Integer2={1}.", new Integer(42), new Integer(43));
 			fail();
 		}
 		catch(IllegalArgumentException e) {
 			String msg = e.getMessage();
-			assertEquals("testMessageText Integer=42 btw!", msg);
+			assertEquals("testMessageText Integer=42 btw! and Integer2=43.", msg);
 		}
 	}
 	
