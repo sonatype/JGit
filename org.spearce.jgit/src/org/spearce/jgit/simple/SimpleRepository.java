@@ -229,7 +229,7 @@ public class SimpleRepository {
 	public void addRemote(final String remoteName, final URIish uri, final String branchName, 
 			              final boolean allSelected, final Collection<Ref> selectedBranches) 
 	throws URISyntaxException, IOException {
-		Validate.notNull(branchName, "cannot checkout; no HEAD advertised by remote {0}", uri);
+		Validate.notNull(branchName, "Branch name must not be null!");
 		
 		// add remote configuration
 		final RemoteConfig rc = new RemoteConfig(db.getConfig(), remoteName);
@@ -287,6 +287,8 @@ public class SimpleRepository {
 	 */
 	public void fetch(final URIish uri, Set<String> want, ProgressMonitor monitor) 
 	throws URISyntaxException, IOException {
+		Validate.notNull(uri, "URI to fetch from must not be null!");
+		
 		if (monitor == null) {
 			monitor = new NullProgressMonitor();
 		}
@@ -333,8 +335,9 @@ public class SimpleRepository {
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @throws IOException 
 	 */
-	public void checkout(String branchName, ProgressMonitor monitor) throws IOException {
-		Validate.notNull(branchName, "branch must not be null");
+	public void checkout(String branchName, ProgressMonitor monitor) 
+	throws IOException {
+		Validate.notNull(branchName, "Branch name must not be null!");
 		
 		if (!Constants.HEAD.equals(branchName)) {
 			db.writeSymref(Constants.HEAD, branchName);
@@ -358,15 +361,12 @@ public class SimpleRepository {
 	 */
 	public List<File> add(File toAdd) 
 	throws Exception {
+		Validate.notNull(toAdd,"File toAdd must not be null!");
+		
+		Validate.isTrue(toAdd.getAbsolutePath().startsWith(db.getWorkDir().getAbsolutePath()),
+				        "File toAdd must be within repository {0}!", db.getWorkDir());
+		
 		List<File> addedFiles = new ArrayList<File>();
-		
-		if  (toAdd == null) {
-			throw new IllegalArgumentException("toAdd must not be null!");
-		}
-		
-		if (!toAdd.getAbsolutePath().startsWith(db.getWorkDir().getAbsolutePath())) {
-			throw new IllegalArgumentException("toAdd must be within repository " + db.getWorkDir());
-		}
 		
 		// the relative path inside the repo
 		String repoPath =  toAdd.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
