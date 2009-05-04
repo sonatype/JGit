@@ -53,7 +53,7 @@ import org.spearce.jgit.transport.URIish;
  */
 public class SimpleRepositoryTest extends RepositoryTestCase {
 
-	private static final String REPO_NAME = "trashRepo";
+	private static final String REPO_NAME = "trash/simpleRepo";
 	@Override
 	public void setUp() throws Exception {
 		super.setUp();
@@ -67,10 +67,15 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		super.tearDown();
 	}
 
+	public void testConfig() throws Exception {
+		db.getConfig().setBoolean("msx", "test", "myBool", true);
+		db.getConfig().save();
+	}
+	
 	public void testInit() throws Exception {
 		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
-		SimpleRepository srep = SimpleRepository.init(REPO_NAME);
+		SimpleRepository srep = SimpleRepository.init(repoDir);
 		assertNotNull(srep);
 		assertTrue(repoDir.exists());
 	}
@@ -87,7 +92,7 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		cloneTestRepository();
 		
 		// and now setup SimpleRepository for an existing .git repo
-		SimpleRepository srep = SimpleRepository.existing(REPO_NAME);
+		SimpleRepository srep = SimpleRepository.existing(repoDir);
 		assertNotNull(srep);
 		assertTrue(repoDir.exists());
 		
@@ -125,7 +130,7 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
 		URIish uri = new URIish("file://" + trash.getAbsolutePath());
-		SimpleRepository srep = SimpleRepository.clone(REPO_NAME, "origin", uri, "master", null);
+		SimpleRepository srep = SimpleRepository.clone(repoDir, "origin", uri, "master", null);
 		assertNotNull(srep);
 		return srep;
 	}

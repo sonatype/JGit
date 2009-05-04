@@ -92,15 +92,15 @@ public class SimpleRepository {
 	/**
 	 * Factory method for creating a SimpleRepository analog to git-init
 	 * in a working directory. 
-	 * @param repoName name of the repository
+	 * @param workDir of the repository
 	 * @return the freshly initialised {@link SimpleRepository}
 	 * @throws IOException 
 	 */
-	public static SimpleRepository init(String repoName) 
+	public static SimpleRepository init(File workDir) 
 	throws IOException {
-		Validate.notNull(repoName, "workdir must not be null!");
+		Validate.notNull(workDir, "workdir must not be null!");
 		SimpleRepository repo = new SimpleRepository();
-		repo.initRepository(repoName, ".git");
+		repo.initRepository(workDir, ".git");
 		return repo;
 	}
 	
@@ -108,15 +108,15 @@ public class SimpleRepository {
 	 * Create a SimpleRepository for an already existing local git 
 	 * repository structure.
 	 * 
-	 * @param repoName name of the existing git repository 
+	 * @param workDir of the existing git repository 
 	 * @return {@link SimpleRepository} or <code>null</code> if the given repoName doesn't contain a git repository
 	 * @throws Exception 
 	 */
-	public static SimpleRepository existing(String repoName)
+	public static SimpleRepository existing(File workDir)
 	throws Exception {
-		Validate.notNull(repoName, "workdir must not be null!");
+		Validate.notNull(workDir, "workdir must not be null!");
 		
-		final File repoDir = new File(repoName, ".git");
+		final File repoDir = new File(workDir, ".git");
 		if (!repoDir.exists()) {
 			return null;
 		}
@@ -133,7 +133,7 @@ public class SimpleRepository {
 	 * Factory method for creating a SimpleRepository analog to git-clone
 	 * in a working directory. This will also checkout the content.  
 	 * 
-	 * @param repoName
+	 * @param workDir
 	 * @param remoteName 
 	 * @param uri 
 	 * @param branch 
@@ -142,10 +142,10 @@ public class SimpleRepository {
 	 * @throws IOException 
 	 * @throws URISyntaxException 
 	 */
-	public static SimpleRepository clone(String repoName, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
+	public static SimpleRepository clone(File workDir, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
 	throws IOException, URISyntaxException {
 		SimpleRepository repo = new SimpleRepository();
-		repo.initRepository(repoName, ".git");
+		repo.initRepository(workDir, ".git");
 		
 		if (monitor == null) {
 			monitor = new NullProgressMonitor();
@@ -171,8 +171,8 @@ public class SimpleRepository {
 
 	/**
 	 * A SimpleRepository may only be created with one of the factory methods.
-	 * @see #init(String)
-	 * @see #clone(String, String, URIish, String, ProgressMonitor)
+	 * @see #init(File)
+	 * @see #clone(File, String, URIish, String, ProgressMonitor)
 	 * @see #wrap(Repository)
 	 */
 	private SimpleRepository() {
@@ -195,13 +195,13 @@ public class SimpleRepository {
 	
 	/**
 	 * Init a freshl local {@code Repository} int the gitDir
-	 * @param repoName of the repository
+	 * @param workDir of the repository
 	 * @param gitDir usually <code>.git</code>
 	 * @throws IOException 
 	 */
-	private void initRepository(String repoName, String gitDir) 
+	private void initRepository(File workDir, String gitDir) 
 	throws IOException {
-		final File repoDir = new File(repoName, gitDir);
+		final File repoDir = new File(workDir, gitDir);
 		db = new Repository(repoDir);
 		db.create();
 
