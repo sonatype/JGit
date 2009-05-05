@@ -42,11 +42,9 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URISyntaxException;
-import java.util.List;
 
 import org.spearce.jgit.lib.RepositoryTestCase;
 import org.spearce.jgit.lib.GitIndex.Entry;
-import org.spearce.jgit.simple.SimpleRepository;
 import org.spearce.jgit.transport.URIish;
 
 /**
@@ -118,9 +116,7 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
         Entry indexEntry = srep.getRepository().getIndex().getEntry(fileNameToAdd);
         assertNull("hoops, found an entry for " + fileNameToAdd + " already: " + indexEntry, indexEntry);
 
-        List<File> addedFiles = srep.add(fileToAdd);
-        assertNotNull(addedFiles);
-        assertEquals(1, addedFiles.size());
+        srep.add(fileToAdd, false);
         
         assertNotNull("hoops, found no entry for " + fileNameToAdd, srep.getRepository().getIndex().getEntry(fileNameToAdd));
         

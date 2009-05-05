@@ -39,9 +39,7 @@
 package org.spearce.jgit.simple;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -49,6 +47,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import org.spearce.jgit.dircache.DirCache;
+import org.spearce.jgit.dircache.DirCacheBuildIterator;
+import org.spearce.jgit.dircache.DirCacheBuilder;
+import org.spearce.jgit.dircache.DirCacheEntry;
 import org.spearce.jgit.errors.CommitException;
 import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
@@ -56,6 +58,7 @@ import org.spearce.jgit.errors.TransportException;
 import org.spearce.jgit.ignore.IgnoreRules;
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
+import org.spearce.jgit.lib.FileMode;
 import org.spearce.jgit.lib.GitIndex;
 import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
@@ -76,6 +79,10 @@ import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
 import org.spearce.jgit.transport.Transport;
 import org.spearce.jgit.transport.URIish;
+import org.spearce.jgit.treewalk.FileTreeIterator;
+import org.spearce.jgit.treewalk.TreeWalk;
+import org.spearce.jgit.treewalk.filter.PathFilter;
+import org.spearce.jgit.treewalk.filter.TreeFilter;
 import org.spearce.jgit.util.Validate;
 
 /**
@@ -359,47 +366,12 @@ public class SimpleRepository {
 		commit.setAuthor(author);
 		commit.setCommitter(committer);
 		commit.setMessage(commitMsg);
-		//X TODO commit.setEncoding();
 
-		GitIndex index = db.getIndex();
-		Entry[] idxEntries = index.getMembers();
-
-		// create the Tree from the Index
-		/*X DELETE THIS 
-	 	Tree t = new Tree(db);
-		for (Entry e: idxEntries) {
-			t.addFile(e.getName());
-			t.setId(e.getObjectId());
-		}
-		*/
-		/*X DELETE THIS!
-		Tree t = db.mapTree(Constants.HEAD);
-		
-		for (Entry e: idxEntries) {
-			String repoRelativePath = e.getName();
-			
-			TreeEntry treeMember = t.findBlobMember(repoRelativePath);
-			// we always want to delete it from the current tree, since if it's
-			// updated, we'll add it again
-			if (treeMember != null) {
-				treeMember.delete();
-			}
-			t.addFile(repoRelativePath);
-			TreeEntry newMember = t.findBlobMember(repoRelativePath);
-
-			newMember.setId(e.getObjectId());
-			System.out.println("New member id for " + repoRelativePath
-					+ ": " + newMember.getId() + " idx id: "
-					+ e.getObjectId());
-		}
-		*/
-		ObjectId indexId = index.writeTree();
-		Tree t = db.mapTree(indexId);
-		commit.setTree(t);
-
-		
-		ObjectWriter writer = new ObjectWriter(db);
-		commit.setCommitId(writer.writeCommit(commit));
+		final ObjectWriter ow = new ObjectWriter(db);
+		final DirCache dc = DirCache.lock(db);
+		commit.setTreeId(dc.writeTree(ow));
+		commit.setCommitId(ow.writeCommit(commit));
+		dc.unlock();
 
 		final RefUpdate ru = db.updateRef(Constants.HEAD);
 		ru.setNewObjectId(commit.getCommitId());
@@ -452,60 +424,121 @@ public class SimpleRepository {
 	/**
 	 * Add a given file or directory to the index.
 	 * @param toAdd file or directory which should be added
-	 * @return a List with all added files
+	 * @param alsoRemove remove files missing from the directory?
 	 * @throws Exception
 	 */
-	public List<File> add(File toAdd) 
+	public void add(File toAdd, boolean alsoRemove)
 	throws Exception {
-		Validate.notNull(toAdd,"File toAdd must not be null!");
-		
-		Validate.isTrue(toAdd.getAbsolutePath().startsWith(db.getWorkDir().getAbsolutePath()),
-				        "File toAdd must be within repository {0}!", db.getWorkDir());
-		
-		List<File> addedFiles = new ArrayList<File>();
-				
-		GitIndex index = db.getIndex();
-		index.read();
-		
-		//recursively add files and directories
-		add(index, addedFiles, toAdd);
-		
-		index.write();
-		
-		addedFiles.add(toAdd);
-		
-		return addedFiles;
+		Validate.notNull(toAdd, "File toAdd must not be null!");
+		final File root = db.getWorkDir();
+		final String toAddCanon = toAdd.getCanonicalPath();
+		final String rootCanon = root.getCanonicalPath();
+		Validate.isTrue(toAddCanon.startsWith(rootCanon),
+				"File toAdd must be within repository {0}!", root);
+
+		final ObjectWriter ow = new ObjectWriter(db);
+		final DirCache dc = DirCache.lock(db);
+		final DirCacheBuilder edit = dc.builder();
+		final TreeWalk tw = new TreeWalk(db);
+		tw.reset();
+		if (toAddCanon.equals(rootCanon))
+			tw.setFilter(TreeFilter.ALL);
+		else
+			tw.setFilter(PathFilter.create(toAddCanon.substring(
+					rootCanon.length() + 1).replace('\\', '/')));
+		tw.addTree(new DirCacheBuildIterator(edit));
+		tw.addTree(new FileTreeIterator(root));
+		while (tw.next()) {
+			final DirCacheBuildIterator i;
+			final FileTreeIterator d;
+			final DirCacheEntry e;
+			
+			if (tw.getRawMode(0) == 0) {
+				// Entry doesn't yet exist in the index.  If its an ignored
+				// path name, skip over the entry.
+				//
+				final File f = new File(root, tw.getPathString());
+				if (ignores.isIgnored(f))
+					continue;
+			}
+
+			if (tw.isSubtree()) {
+				// The index doesn't allow trees directly, we need to
+				// recurse and process only leaf nodes.
+				//
+				tw.enterSubtree();
+				continue;
+			}
+
+			i = tw.getTree(0, DirCacheBuildIterator.class);
+			d = tw.getTree(1, FileTreeIterator.class);
+
+			if (tw.getRawMode(0) == 0) {
+				e = new DirCacheEntry(tw.getRawPath());
+				edit.add(e);
+
+			} else if (tw.getRawMode(1) == 0) {
+				// Entry is no longer in the directory, but is still in the
+				// index.  If we aren't supposed to process removals, keep
+				// the entry in the cache.
+				//
+				if (!alsoRemove)
+					edit.add(i.getDirCacheEntry());
+				continue;
+
+			} else if (FileMode.SYMLINK.equals(tw.getFileMode(0))) {
+				// Entry exists as a symlink. We can't process that in Java.
+				//
+				edit.add(i.getDirCacheEntry());
+				continue;
+
+			} else {
+				e = i.getDirCacheEntry();
+				edit.add(e);
+			}
+
+			final FileMode mode = d.getEntryFileMode();
+			if (FileMode.GITLINK.equals(mode)) {
+				// TODO: FileTreeIterator doesn't implement objectId right
+				// for a GITLINK yet.
+				//
+				e.setLength(0);
+				e.setLastModified(0);
+				e.setObjectId(d.getEntryObjectId());
+
+			} else if (e.getLength() != d.getEntryLength()
+					|| !timestampMatches(e, d)) {
+				final File f = new File(root, tw.getPathString());
+				e.setLength((int) d.getEntryLength());
+				e.setLastModified(d.getEntryLastModified());
+				e.setObjectId(ow.writeBlob(f));
+			}
+			e.setFileMode(mode);
+		}
+		if (!edit.commit())
+			throw new IOException("Can't update index");
 	}
 
-	
-	private void add(GitIndex index, List<File> addedFiles,	File toAdd) 
-	throws FileNotFoundException, IOException, Exception, UnsupportedEncodingException {
-		// the relative path inside the repo
-		String repoPath =  toAdd.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
+	private static boolean timestampMatches(final DirCacheEntry indexEntry,
+			final FileTreeIterator workEntry) {
+		final long tIndex = indexEntry.getLastModified();
+		final long tWork = workEntry.getEntryLastModified();
 
-		//check for ignored files!
-		if (ignores.isIgnored(toAdd)) {
-			return;
-		}
-
-		if (toAdd.isDirectory()) {
-			for(File f : toAdd.listFiles()) {
-				// recursively add files
-				addedFiles.addAll(add(f));
-			}
-		} else {
-			Entry entry = index.getEntry(repoPath);
-			if (entry != null) {
-				if (!entry.isAssumedValid()) {
-					System.out.println("Already tracked - skipping");
-					return;
-				}
-			}
-		}
-
-		//X TODO this should be implemented using DirCache!
-		Entry entry = index.add(db.getWorkDir(), toAdd);
-		entry.setAssumeValid(false);
+		// C-Git under Windows stores timestamps with 1-seconds resolution,
+		// so we need to check to see if this is the case here, and possibly
+		// fix the timestamp of the resource to match the resolution of the
+		// index.
+		//
+		// It also appears the timestamp in Java on Linux may also be rounded
+		// in which case the index timestamp may have subseconds, but not
+		// the timestamp from the workspace resource.
+		//
+		// If either timestamp looks rounded we skip the subscond part.
+		//
+		if (tIndex % 1000 == 0 || tWork % 1000 == 0)
+			return tIndex / 1000 == tWork / 1000;
+		else
+			return tIndex == tWork;
 	}
 
 	/**
