@@ -45,6 +45,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 
 import org.spearce.jgit.lib.RepositoryTestCase;
+import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.simple.SimpleRepository;
 import org.spearce.jgit.transport.URIish;
 
@@ -67,11 +68,6 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		super.tearDown();
 	}
 
-	public void testConfig() throws Exception {
-		db.getConfig().setBoolean("msx", "test", "myBool", true);
-		db.getConfig().save();
-	}
-	
 	public void testInit() throws Exception {
 		File repoDir = new File(REPO_NAME);
 		recursiveDelete(repoDir);
@@ -112,18 +108,30 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		assertTrue(testFile.exists());
 	}
 
-	public void testAdd() throws Exception {
+	public void testAddCommit() throws Exception {
+		String fileNameToAdd = "myNewFile.txt";
 		SimpleRepository srep = cloneTestRepository();
-		File fileToAdd = new File(srep.getRepository().getWorkDir(), "myNewFile.txt");
-        BufferedWriter out = new BufferedWriter(new FileWriter(fileToAdd));
-        out.write("This File will be added, sic!S");
-        out.close();
-        
+		
+		// first we add a file to the Index
+		File fileToAdd = createNewFile(srep, fileNameToAdd, "This File will be added, sic!");
+
+        Entry indexEntry = srep.getRepository().getIndex().getEntry(fileNameToAdd);
+        assertNull("hoops, found an entry for " + fileNameToAdd + " already: " + indexEntry, indexEntry);
+
         List<File> addedFiles = srep.add(fileToAdd);
         assertNotNull(addedFiles);
         assertEquals(1, addedFiles.size());
+        
+        assertNotNull("hoops, found no entry for " + fileNameToAdd, srep.getRepository().getIndex().getEntry(fileNameToAdd));
+        
+        // now we commit the Index against the tree
+        srep.commit(null, null, "test commit");
+        
 	}
 
+	public void testPush() throws Exception {
+		//X TODO
+	}
 	
 	private SimpleRepository cloneTestRepository() 
 	throws URISyntaxException, IOException {
@@ -135,5 +143,25 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		return srep;
 	}
 
+	/**
+	 * Create a fresh file in the repository
+	 * @param srep
+	 * @param fileNameToAdd
+	 * @param content
+	 * @return the freshly created File
+	 * @throws IOException
+	 */
+	private File createNewFile(SimpleRepository srep, String fileNameToAdd, String content)
+	throws IOException {
+		File fileToAdd = new File(srep.getRepository().getWorkDir(), fileNameToAdd);
+		
+		assertFalse("File " + fileToAdd.getAbsolutePath() + " already exists!", fileToAdd.exists());
+		
+		BufferedWriter out = new BufferedWriter(new FileWriter(fileToAdd));
+		out.write(content);
+		out.close();
+		return fileToAdd;
+	}
+	
 
 }

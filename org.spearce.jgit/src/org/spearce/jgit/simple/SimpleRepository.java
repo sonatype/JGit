@@ -39,7 +39,9 @@
 package org.spearce.jgit.simple;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,6 +49,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import org.spearce.jgit.errors.CommitException;
 import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
 import org.spearce.jgit.errors.TransportException;
@@ -56,6 +59,8 @@ import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.GitIndex;
 import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.ObjectWriter;
+import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
 import org.spearce.jgit.lib.RefComparator;
@@ -328,6 +333,96 @@ public class SimpleRepository {
 	}
 
 	/**
+	 * Commit the changes accumulated in the Index 
+	 * @param author if <code>null</code> the default author of the {@code Repository} will be used 
+	 * @param committer if <code>null</code> the author will be used 
+	 * @param commitMsg commit message
+	 * @throws IOException 
+	 */
+	public void commit(PersonIdent author, PersonIdent committer, String commitMsg) 
+	throws IOException {
+		Validate.notNull(commitMsg, "Commit message must not be null!");
+		
+		if (author == null) {
+			author = new PersonIdent(db);
+		}
+		
+		if (committer == null) {
+			committer = author;
+		}
+		
+		ObjectId currentHeadId = db.resolve(Constants.HEAD);
+		ObjectId[] parentIds = new ObjectId[]{currentHeadId};
+
+		Commit commit = new Commit(db, parentIds);
+		commit.setAuthor(author);
+		commit.setCommitter(committer);
+		commit.setMessage(commitMsg);
+		//X TODO commit.setEncoding();
+
+		GitIndex index = db.getIndex();
+		Entry[] idxEntries = index.getMembers();
+
+		// create the Tree from the Index
+		/*X DELETE THIS 
+	 	Tree t = new Tree(db);
+		for (Entry e: idxEntries) {
+			t.addFile(e.getName());
+			t.setId(e.getObjectId());
+		}
+		*/
+		/*X DELETE THIS!
+		Tree t = db.mapTree(Constants.HEAD);
+		
+		for (Entry e: idxEntries) {
+			String repoRelativePath = e.getName();
+			
+			TreeEntry treeMember = t.findBlobMember(repoRelativePath);
+			// we always want to delete it from the current tree, since if it's
+			// updated, we'll add it again
+			if (treeMember != null) {
+				treeMember.delete();
+			}
+			t.addFile(repoRelativePath);
+			TreeEntry newMember = t.findBlobMember(repoRelativePath);
+
+			newMember.setId(e.getObjectId());
+			System.out.println("New member id for " + repoRelativePath
+					+ ": " + newMember.getId() + " idx id: "
+					+ e.getObjectId());
+		}
+		*/
+		ObjectId indexId = index.writeTree();
+		Tree t = db.mapTree(indexId);
+		commit.setTree(t);
+
+		
+		ObjectWriter writer = new ObjectWriter(db);
+		commit.setCommitId(writer.writeCommit(commit));
+
+		final RefUpdate ru = db.updateRef(Constants.HEAD);
+		ru.setNewObjectId(commit.getCommitId());
+		ru.setRefLogMessage(buildReflogMessage(commitMsg, false), false);
+		if (ru.forceUpdate() == RefUpdate.Result.LOCK_FAILURE) {
+			throw new CommitException(commit.getCommitId(), "reflog locked!"); 
+		}
+
+		//X TODO remove debug info!
+		System.out.println("commit: objectId=" + commit.getCommitId());
+	}
+	
+	/**
+	 * Push the commits from the branchLocale to the branchRemote on the repo
+	 * with the uri.
+	 * @param uri
+	 * @param branchLocale
+	 * @param branchRemote
+	 */
+	public void push(URIish uri, String branchLocale, String branchRemote) {
+		//X TODO
+	}
+	
+	/**
 	 * Checkout the given branch from the local repository.
 	 * This command makes no remote connections!
 	 * 
@@ -367,15 +462,29 @@ public class SimpleRepository {
 				        "File toAdd must be within repository {0}!", db.getWorkDir());
 		
 		List<File> addedFiles = new ArrayList<File>();
+				
+		GitIndex index = db.getIndex();
+		index.read();
 		
+		//recursively add files and directories
+		add(index, addedFiles, toAdd);
+		
+		index.write();
+		
+		addedFiles.add(toAdd);
+		
+		return addedFiles;
+	}
+
+	
+	private void add(GitIndex index, List<File> addedFiles,	File toAdd) 
+	throws FileNotFoundException, IOException, Exception, UnsupportedEncodingException {
 		// the relative path inside the repo
 		String repoPath =  toAdd.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
-		
-		GitIndex index = db.getIndex();
-		
+
 		//check for ignored files!
 		if (ignores.isIgnored(toAdd)) {
-			return addedFiles;
+			return;
 		}
 
 		if (toAdd.isDirectory()) {
@@ -388,7 +497,7 @@ public class SimpleRepository {
 			if (entry != null) {
 				if (!entry.isAssumedValid()) {
 					System.out.println("Already tracked - skipping");
-					return addedFiles;
+					return;
 				}
 			}
 		}
@@ -396,12 +505,6 @@ public class SimpleRepository {
 		//X TODO this should be implemented using DirCache!
 		Entry entry = index.add(db.getWorkDir(), toAdd);
 		entry.setAssumeValid(false);
-		
-		index.write();
-		
-		addedFiles.add(toAdd);
-		
-		return addedFiles;
 	}
 
 	/**
@@ -470,13 +573,52 @@ public class SimpleRepository {
 		//X TODO REMOVE DEBUGGING OUTPUT!
 		System.out.println("updateRef " + u + " returned Result=" + result);
 
-		final GitIndex index = new GitIndex(db);
+		final GitIndex index = db.getIndex();
 		final Tree tree = commit.getTree();
 		final WorkDirCheckout co;
 
 		co = new WorkDirCheckout(db, db.getWorkDir(), index, tree);
 		co.checkout();
 		index.write();
+		
+		printIndex();
 	}
 
+	/**
+	 * build the message for the ref log
+	 * @param commitMessage
+	 * @param amending if commit amends the previous one
+	 * @return the reflog message
+	 */
+	private String buildReflogMessage(String commitMessage, boolean amending) {
+		String firstLine = commitMessage;
+		int newlineIndex = commitMessage.indexOf("\n");
+		if (newlineIndex > 0) {
+			firstLine = commitMessage.substring(0, newlineIndex);
+		}
+		String commitStr = amending ? "\tcommit (amend):" : "\tcommit: ";
+		String message = commitStr + firstLine;
+		return message;
+	}
+
+
+	/**
+	 * This is only a test function and should be re/moved finally!
+	 */
+	public void printIndex() {
+		GitIndex idx;
+		try {
+			idx = db.getIndex();
+			
+			System.out.println("Index is changed: " + idx.isChanged());
+			Entry[] entries = idx.getMembers();
+			for (Entry e : entries) {
+				System.out.println(e.toString());
+			}
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		
+	}
 }
