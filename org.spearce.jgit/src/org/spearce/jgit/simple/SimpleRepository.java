@@ -171,6 +171,7 @@ public class SimpleRepository {
 	public static SimpleRepository wrap(Repository db) {
 		SimpleRepository repo = new SimpleRepository();
 		repo.db = db;
+		repo.ignores = new IgnoreRules(db);
 		return repo;
 	}
 
