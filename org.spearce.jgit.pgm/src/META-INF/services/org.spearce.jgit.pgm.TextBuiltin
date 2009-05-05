@@ -1,3 +1,4 @@
+org.spearce.jgit.pgm.Add
 org.spearce.jgit.pgm.Branch
 org.spearce.jgit.pgm.Clone
 org.spearce.jgit.pgm.Daemon
