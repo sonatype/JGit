@@ -45,6 +45,7 @@ import org.spearce.jgit.lib.ObjectId;
  * Exception thrown if a problem occurs during a commit.
  */
 public class CommitException extends IOException {
+	/** for serialization  */
 	private static final long serialVersionUID = 1L;
 
 

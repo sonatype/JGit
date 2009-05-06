@@ -75,10 +75,13 @@ import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.lib.RefUpdate.Result;
 import org.spearce.jgit.transport.FetchResult;
+import org.spearce.jgit.transport.PushResult;
 import org.spearce.jgit.transport.RefSpec;
 import org.spearce.jgit.transport.RemoteConfig;
+import org.spearce.jgit.transport.RemoteRefUpdate;
 import org.spearce.jgit.transport.Transport;
 import org.spearce.jgit.transport.URIish;
+import org.spearce.jgit.transport.RemoteRefUpdate.Status;
 import org.spearce.jgit.treewalk.FileTreeIterator;
 import org.spearce.jgit.treewalk.TreeWalk;
 import org.spearce.jgit.treewalk.filter.PathFilter;
@@ -383,16 +386,125 @@ public class SimpleRepository {
 		//X TODO remove debug info!
 		System.out.println("commit: objectId=" + commit.getCommitId());
 	}
-	
+
+	/**
+	 * Convenience function to push a branch with a given name to a uri.
+	 * 
+	 * @see #push(ProgressMonitor, URIish, String, String, String, boolean, boolean, String) 
+	 * @param monitor
+	 * @param uri
+	 * @param branchName will be used as name for both the local and remote branch
+	 * @return <code>true</code> if the push was ok 
+	 * @throws IOException 
+	 * @throws URISyntaxException 
+	 */
+	public boolean push(ProgressMonitor monitor, URIish uri, String branchName) 
+	throws URISyntaxException, IOException {
+		return push(monitor, uri, null, branchName, branchName, false, false, null);
+	}
+
+	/**
+	 * Convenience function to push a branch with a given name to a remote specified via it's name.
+	 * 
+	 * @see #push(ProgressMonitor, URIish, String, String, String, boolean, boolean, String) 
+	 * @param monitor
+	 * @param remoteName e.g. &quot;origin&qout;
+	 * @param branchName will be used as name for both the local and remote branch
+	 * @return <code>true</code> if the push was ok 
+	 * @throws IOException 
+	 * @throws URISyntaxException 
+	 */
+	public boolean push(ProgressMonitor monitor, String remoteName, String branchName) 
+	throws URISyntaxException, IOException {
+		return push(monitor, null, remoteName, branchName, branchName, false, false, null);
+	}
+
 	/**
 	 * Push the commits from the branchLocale to the branchRemote on the repo
 	 * with the uri.
-	 * @param uri
-	 * @param branchLocale
-	 * @param branchRemote
+	 * 
+	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
+	 * @param uri if given, we will use that very uri to push too
+	 * @param remoteName if no uri is given, we will use this remote to push to
+	 * @param localBranchName
+	 * @param remoteBranchName
+	 * @param pushAllBranches
+	 * @param pushTags
+	 * @param receivePack Path to the git-receive-pack program on the remote end. Sometimes useful when pushing 
+	 * 		to a remote repository over ssh, and you do not have the program in a directory on the default $PATH.
+	 * @return <code>true</code> if the push was ok 
+	 * @throws IOException 
+	 * @throws URISyntaxException
 	 */
-	public void push(URIish uri, String branchLocale, String branchRemote) {
-		//X TODO
+	public boolean push(ProgressMonitor monitor, URIish uri, String remoteName, String localBranchName, 
+			            String remoteBranchName, boolean pushAllBranches, boolean pushTags,
+			           String receivePack)
+	throws URISyntaxException, IOException {
+		Validate.isTrue(uri != null || remoteName != null, "either uri or remoteName must be set!");
+		
+		if (monitor == null) {
+			monitor = new NullProgressMonitor();
+		}
+		
+		if (remoteBranchName == null) {
+			remoteBranchName = localBranchName;
+		}
+		
+		List<RefSpec> refSpecs = new ArrayList<RefSpec>();
+		
+		if (pushAllBranches) {
+			refSpecs.add(Transport.REFSPEC_PUSH_ALL);
+		}
+		
+		if (pushTags) {
+			refSpecs.add(Transport.REFSPEC_TAGS);
+		}
+		
+		if (!pushAllBranches && localBranchName != null) {
+			RefSpec rs = new RefSpec("+refs/heads/" + localBranchName +":refs/heads/" + remoteBranchName);
+			refSpecs.add(rs);
+		}
+		
+		final List<Transport> transports;
+		
+		if (uri != null) {
+			transports = new ArrayList<Transport>();
+			transports.add(Transport.open(db, uri));
+		}
+		else {
+			transports = Transport.openAll(db, remoteName);
+		}
+		
+		for (final Transport transport : transports) {
+			if (receivePack != null) {
+			 	transport.setOptionReceivePack(receivePack);
+			}
+
+			final Collection<RemoteRefUpdate> toPush = transport.findRemoteRefUpdatesFor(refSpecs);
+
+			final PushResult result;
+			try {
+				result = transport.push(monitor, toPush);
+			} finally {
+				transport.close();
+			}
+			
+			// evaluate PushResult and make upToDate Check
+			for (final RemoteRefUpdate rru : result.getRemoteUpdates()) {
+				Status status = rru.getStatus();
+				if (status == Status.REJECTED_NODELETE ||
+					status == Status.REJECTED_NONFASTFORWARD ||
+					status == Status.REJECTED_OTHER_REASON ||
+					status == Status.REJECTED_REMOTE_CHANGED ) {
+					// oooh, we don't succeed!
+					
+					//X TODO we are not quite verbose here ...
+					return false;
+				}
+			}
+		}
+		
+		return true;
 	}
 	
 	/**

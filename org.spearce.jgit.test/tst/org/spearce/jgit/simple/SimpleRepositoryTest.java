@@ -43,6 +43,8 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URISyntaxException;
 
+import org.spearce.jgit.lib.Commit;
+import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.RepositoryTestCase;
 import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.transport.URIish;
@@ -106,8 +108,9 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		assertTrue(testFile.exists());
 	}
 
-	public void testAddCommit() throws Exception {
-		String fileNameToAdd = "myNewFile.txt";
+	public void testAddCommitPush() throws Exception {
+		final String fileNameToAdd = "myNewFile.txt";
+		final String commitMessage = "test commit";
 		SimpleRepository srep = cloneTestRepository();
 		
 		// first we add a file to the Index
@@ -118,11 +121,25 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 
         srep.add(fileToAdd, false);
         
+        srep.getRepository().getIndex().read();
         assertNotNull("hoops, found no entry for " + fileNameToAdd, srep.getRepository().getIndex().getEntry(fileNameToAdd));
         
         // now we commit the Index against the tree
-        srep.commit(null, null, "test commit");
+        srep.commit(null, null, commitMessage);
         
+        // verify the commit
+        Commit lastLocalCommit = srep.getRepository().mapCommit(Constants.HEAD);
+        assertNotNull(lastLocalCommit);
+        assertEquals(commitMessage, lastLocalCommit.getMessage());
+        
+        // push it, baby, push it real good :)
+        boolean pushOk = srep.push(null, "origin", "master");
+        assertTrue(pushOk);
+        
+        // verify the push
+        Commit lastPushedCommit = db.mapCommit(Constants.HEAD);
+        assertNotNull(lastPushedCommit);
+        assertEquals(commitMessage, lastPushedCommit.getMessage());
 	}
 
 	public void testPush() throws Exception {
