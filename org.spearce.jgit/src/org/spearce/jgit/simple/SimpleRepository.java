@@ -52,6 +52,7 @@ import org.spearce.jgit.dircache.DirCacheBuildIterator;
 import org.spearce.jgit.dircache.DirCacheBuilder;
 import org.spearce.jgit.dircache.DirCacheEntry;
 import org.spearce.jgit.errors.CommitException;
+import org.spearce.jgit.errors.CorruptObjectException;
 import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
 import org.spearce.jgit.errors.TransportException;
@@ -74,6 +75,7 @@ import org.spearce.jgit.lib.Tree;
 import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.lib.RefUpdate.Result;
+import org.spearce.jgit.simple.LsFileEntry.FileStatus;
 import org.spearce.jgit.transport.FetchResult;
 import org.spearce.jgit.transport.PushResult;
 import org.spearce.jgit.transport.RefSpec;
@@ -207,6 +209,15 @@ public class SimpleRepository {
 	 */
 	public void close() {
 		db.close();
+	}
+	
+	/**
+	 * @return the name of the current branch
+	 * @throws IOException 
+	 */
+	public String getBranch() 
+	throws IOException {
+		return db.getBranch();
 	}
 	
 	/**
@@ -631,6 +642,37 @@ public class SimpleRepository {
 			throw new IOException("Can't update index");
 	}
 
+	/**
+	 * Show information about files in the Index and the working tree.
+	 * @param cached list cached files in the output
+	 * @param deleted list deleted files in the output
+	 * @param ignored list ignored files in the output
+	 * @return list of all files 
+	 * @throws IOException 
+	 * @throws CorruptObjectException 
+	 */
+	public List<LsFileEntry> lsFiles(boolean cached, boolean deleted, boolean ignored) 
+	throws CorruptObjectException, IOException {
+		ArrayList<LsFileEntry> fileEntries = new ArrayList<LsFileEntry>();
+		
+		//X TODO for now this only reads the index, but we must also check for changes in the workDir!
+		final DirCache cache = DirCache.read(db);
+		for (int i = 0; i < cache.getEntryCount(); i++) {
+			final DirCacheEntry ent = cache.getEntry(i);
+			
+			//X TODO this is surey not enough ;)
+			FileStatus fs = FileStatus.CACHED;
+			LsFileEntry fileEntry = new LsFileEntry(ent.getPathString(), fs, ent.getObjectId());
+			fileEntries.add(fileEntry);
+		}
+		return fileEntries;
+	}
+	
+	
+	//------------------------------------
+	// private helper functions
+	//------------------------------------
+	
 	private static boolean timestampMatches(final DirCacheEntry indexEntry,
 			final FileTreeIterator workEntry) {
 		final long tIndex = indexEntry.getLastModified();

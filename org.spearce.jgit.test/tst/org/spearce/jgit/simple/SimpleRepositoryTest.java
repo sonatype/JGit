@@ -42,6 +42,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.List;
 
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
@@ -142,8 +143,15 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
         assertEquals(commitMessage, lastPushedCommit.getMessage());
 	}
 
-	public void testPush() throws Exception {
-		//X TODO
+	public void testLsFiles() throws Exception {
+		SimpleRepository srep = cloneTestRepository();
+		List<LsFileEntry> entries = srep.lsFiles(true, false, false);
+		assertNotNull(entries);
+		assertFalse(entries.isEmpty());
+		for (int i=0; i < entries.size(); i++) {
+			System.out.println("LsFileEntry[" + i + "]: " + entries.get(i));
+		}
+		assertEquals(8, entries.size());
 	}
 	
 	private SimpleRepository cloneTestRepository() 
