@@ -145,13 +145,24 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 
 	public void testLsFiles() throws Exception {
 		SimpleRepository srep = cloneTestRepository();
-		List<LsFileEntry> entries = srep.lsFiles(true, false, false);
+		List<LsFileEntry> entries = srep.lsFiles();
 		assertNotNull(entries);
 		assertFalse(entries.isEmpty());
 		for (int i=0; i < entries.size(); i++) {
 			System.out.println("LsFileEntry[" + i + "]: " + entries.get(i));
 		}
 		assertEquals(8, entries.size());
+		
+		// now lets create a file
+		createNewFile(srep, "myNewFile.txt", "lsFiles testcontent");
+
+		entries = srep.lsFiles();
+		assertNotNull(entries);
+		assertFalse(entries.isEmpty());
+		for (int i=0; i < entries.size(); i++) {
+			System.out.println("LsFileEntry[" + i + "]: " + entries.get(i));
+		}
+		assertEquals(9, entries.size());
 	}
 	
 	private SimpleRepository cloneTestRepository() 

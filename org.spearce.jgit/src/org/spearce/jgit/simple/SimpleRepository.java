@@ -39,13 +39,18 @@
 package org.spearce.jgit.simple;
 
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 
 import org.spearce.jgit.dircache.DirCache;
 import org.spearce.jgit.dircache.DirCacheBuildIterator;
@@ -73,7 +78,6 @@ import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
 import org.spearce.jgit.lib.WorkDirCheckout;
-import org.spearce.jgit.lib.GitIndex.Entry;
 import org.spearce.jgit.lib.RefUpdate.Result;
 import org.spearce.jgit.simple.LsFileEntry.FileStatus;
 import org.spearce.jgit.transport.FetchResult;
@@ -374,6 +378,8 @@ public class SimpleRepository {
 		}
 		
 		ObjectId currentHeadId = db.resolve(Constants.HEAD);
+		Validate.notNull(currentHeadId, "currentHeadId must not be null!");
+		
 		ObjectId[] parentIds = new ObjectId[]{currentHeadId};
 
 		Commit commit = new Commit(db, parentIds);
@@ -553,9 +559,11 @@ public class SimpleRepository {
 	public void add(File toAdd, boolean alsoRemove)
 	throws Exception {
 		Validate.notNull(toAdd, "File toAdd must not be null!");
+		
 		final File root = db.getWorkDir();
 		final String toAddCanon = toAdd.getCanonicalPath();
 		final String rootCanon = root.getCanonicalPath();
+		
 		Validate.isTrue(toAddCanon.startsWith(rootCanon),
 				"File toAdd must be within repository {0}!", root);
 
@@ -644,31 +652,96 @@ public class SimpleRepository {
 
 	/**
 	 * Show information about files in the Index and the working tree.
-	 * @param cached list cached files in the output
-	 * @param deleted list deleted files in the output
-	 * @param ignored list ignored files in the output
+	 * TODO this doesn't currently work like git-ls-files but more like a mixture of that and git-status...
 	 * @return list of all files 
 	 * @throws IOException 
 	 * @throws CorruptObjectException 
 	 */
-	public List<LsFileEntry> lsFiles(boolean cached, boolean deleted, boolean ignored) 
+	public List<LsFileEntry> lsFiles() 
 	throws CorruptObjectException, IOException {
-		ArrayList<LsFileEntry> fileEntries = new ArrayList<LsFileEntry>();
+		Map<String, LsFileEntry> cachedEntries = new TreeMap<String, LsFileEntry>(); 
 		
-		//X TODO for now this only reads the index, but we must also check for changes in the workDir!
+		//first read all the files which are the Index
 		final DirCache cache = DirCache.read(db);
 		for (int i = 0; i < cache.getEntryCount(); i++) {
 			final DirCacheEntry ent = cache.getEntry(i);
 			
-			//X TODO this is surey not enough ;)
+			//X TODO this is surely not enough ;)
 			FileStatus fs = FileStatus.CACHED;
 			LsFileEntry fileEntry = new LsFileEntry(ent.getPathString(), fs, ent.getObjectId());
-			fileEntries.add(fileEntry);
+			cachedEntries.put(ent.getPathString(), fileEntry);
 		}
+
+		// now read all the files on the disk
+		Set<String> filesOnDisk = new TreeSet<String>(); 
+		File workDir = db.getWorkDir();
+		addFiles(filesOnDisk, "", workDir);
+		
+		// and now compare them. since both are already sorted because we used TreeMap and TreeSort
+		// we can simply crawl over them end compare them. kind of a merge sort though...
+		ArrayList<LsFileEntry> fileEntries = new ArrayList<LsFileEntry>();
+
+		Iterator<String> cacheIt = cachedEntries.keySet().iterator();
+		Iterator<String> fileIt  = filesOnDisk.iterator();
+		
+		String cachedPath = null;
+		String fsPath = null;
+		while (cacheIt.hasNext() || fileIt.hasNext()) {
+			
+			if (cachedPath == null && cacheIt.hasNext()) {
+				cachedPath =  cacheIt.next();
+			}
+			
+			if (fsPath == null && fileIt.hasNext()) {
+				fsPath = fileIt.next();
+			}
+			
+			if (cachedPath != null && cachedPath.equals(fsPath)) {
+				// oh found in both systems
+				fileEntries.add(cachedEntries.get(cachedPath));
+				cachedPath = null;
+				fsPath = null;
+				continue;
+			}
+			
+			if (cachedPath != null && !fileEntries.contains(cachedPath)) {
+				fileEntries.add(new LsFileEntry(cachedPath, FileStatus.REMOVED,  null));
+				cachedPath = null;
+				continue;
+			}
+			
+			if (fsPath != null && !cachedEntries.keySet().contains(fsPath)) {
+				fileEntries.add(new LsFileEntry(fsPath, FileStatus.OTHER,  null));
+				fsPath = null;
+				continue;
+			}
+			
+			cachedPath = null;
+			fsPath = null;
+			
+		}
+		
 		return fileEntries;
 	}
 	
 	
+	private void addFiles(Set<String> filesOnDisk, String baseDir, File curDir) 
+	throws FileNotFoundException, IOException {
+		File[] files = curDir.listFiles();
+		for (File f : files) {
+			if (f.isDirectory()) {
+				if (!ignores.isIgnored(f)) {
+					addFiles(filesOnDisk, baseDir + f.getName() + File.separator, f);
+				}
+			} else {
+				if (!ignores.isIgnored(f)) {
+					filesOnDisk.add(baseDir + f.getName());
+				}
+			}
+		}
+		
+	}
+
 	//------------------------------------
 	// private helper functions
 	//------------------------------------
@@ -768,8 +841,6 @@ public class SimpleRepository {
 		co = new WorkDirCheckout(db, db.getWorkDir(), index, tree);
 		co.checkout();
 		index.write();
-		
-		printIndex();
 	}
 
 	/**
@@ -789,24 +860,4 @@ public class SimpleRepository {
 		return message;
 	}
 
-
-	/**
-	 * This is only a test function and should be re/moved finally!
-	 */
-	public void printIndex() {
-		GitIndex idx;
-		try {
-			idx = db.getIndex();
-			
-			System.out.println("Index is changed: " + idx.isChanged());
-			Entry[] entries = idx.getMembers();
-			for (Entry e : entries) {
-				System.out.println(e.toString());
-			}
-		} catch (IOException e1) {
-			// TODO Auto-generated catch block
-			e1.printStackTrace();
-		}
-		
-	}
 }
