@@ -46,6 +46,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 
 import org.spearce.jgit.lib.Repository;
+import org.spearce.jgit.util.Validate;
 
 /**
  *  Handle all the Ignore rules defined by git
@@ -96,6 +97,12 @@ public class IgnoreRules {
 	 */
 	public boolean isIgnored(File toCheckFor) 
 	throws FileNotFoundException, IOException {
+		Validate.notNull(toCheckFor, "file to check for ignore must not be null!");
+		
+		// ignore /.git in any case
+		if (toCheckFor.getParentFile().equals(db.getWorkDir()) && toCheckFor.getName().equals(".git")) {
+			return true;
+		}
 		
 		if (checkGitignoreFiles(toCheckFor)) {
 			return true;
