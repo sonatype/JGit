@@ -40,6 +40,7 @@ package org.spearce.jgit.transport;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Set;
 
@@ -47,8 +48,10 @@ import org.spearce.jgit.errors.TransportException;
 import org.spearce.jgit.lib.AnyObjectId;
 import org.spearce.jgit.lib.MutableObjectId;
 import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.PackLock;
 import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
+import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.revwalk.RevCommit;
 import org.spearce.jgit.revwalk.RevCommitList;
 import org.spearce.jgit.revwalk.RevFlag;
@@ -126,10 +129,19 @@ abstract class BasePackFetchConnection extends BasePackConnection implements
 
 	private boolean includeTags;
 
+	private boolean allowOfsDelta;
+
+	private String lockMessage;
+
+	private PackLock packLock;
+
 	BasePackFetchConnection(final PackTransport packTransport) {
 		super(packTransport);
+
+		final RepositoryConfig cfg = local.getConfig();
 		includeTags = transport.getTagOpt() != TagOpt.NO_TAGS;
 		thinPack = transport.isFetchThin();
+		allowOfsDelta = cfg.getBoolean("repack", "usedeltabaseoffset", true);
 
 		walk = new RevWalk(local);
 		reachableCommits = new RevCommitList<RevCommit>();
@@ -155,6 +167,16 @@ abstract class BasePackFetchConnection extends BasePackConnection implements
 
 	public boolean didFetchTestConnectivity() {
 		return false;
+	}
+
+	public void setPackLockMessage(final String message) {
+		lockMessage = message;
+	}
+
+	public Collection<PackLock> getPackLocks() {
+		if (packLock != null)
+			return Collections.singleton(packLock);
+		return Collections.<PackLock> emptyList();
 	}
 
 	protected void doFetch(final ProgressMonitor monitor,
@@ -282,7 +304,8 @@ abstract class BasePackFetchConnection extends BasePackConnection implements
 		final StringBuilder line = new StringBuilder();
 		if (includeTags)
 			includeTags = wantCapability(line, OPTION_INCLUDE_TAG);
-		wantCapability(line, OPTION_OFS_DELTA);
+		if (allowOfsDelta)
+			wantCapability(line, OPTION_OFS_DELTA);
 		multiAck = wantCapability(line, OPTION_MULTI_ACK);
 		if (thinPack)
 			thinPack = wantCapability(line, OPTION_THIN_PACK);
@@ -477,7 +500,7 @@ abstract class BasePackFetchConnection extends BasePackConnection implements
 		ip.setFixThin(thinPack);
 		ip.setObjectChecking(transport.isCheckFetchedObjects());
 		ip.index(monitor);
-		ip.renameAndOpenPack();
+		packLock = ip.renameAndOpenPack(lockMessage);
 	}
 
 	private static class CancelledException extends Exception {

@@ -64,6 +64,7 @@ import org.spearce.jgit.lib.MutableObjectId;
 import org.spearce.jgit.lib.ObjectChecker;
 import org.spearce.jgit.lib.ObjectId;
 import org.spearce.jgit.lib.PackIndex;
+import org.spearce.jgit.lib.PackLock;
 import org.spearce.jgit.lib.ProgressMonitor;
 import org.spearce.jgit.lib.Ref;
 import org.spearce.jgit.lib.Repository;
@@ -167,6 +168,10 @@ class WalkFetchConnection extends BaseFetchConnection {
 	 */
 	private final HashMap<ObjectId, List<Throwable>> fetchErrors;
 
+	private String lockMessage;
+
+	private final List<PackLock> packLocks;
+
 	WalkFetchConnection(final WalkTransport t, final WalkRemoteObjectDatabase w) {
 		Transport wt = (Transport)t;
 		local = wt.local;
@@ -185,6 +190,7 @@ class WalkFetchConnection extends BaseFetchConnection {
 		noAlternatesYet.add(w);
 
 		fetchErrors = new HashMap<ObjectId, List<Throwable>>();
+		packLocks = new ArrayList<PackLock>(4);
 
 		revWalk = new RevWalk(local);
 		treeWalk = new TreeWalk(local);
@@ -213,6 +219,14 @@ class WalkFetchConnection extends BaseFetchConnection {
 				downloadObject(monitor, id);
 			process(id);
 		}
+	}
+
+	public Collection<PackLock> getPackLocks() {
+		return packLocks;
+	}
+
+	public void setPackLockMessage(final String message) {
+		lockMessage = message;
 	}
 
 	@Override
@@ -588,7 +602,7 @@ class WalkFetchConnection extends BaseFetchConnection {
 		if (!AnyObjectId.equals(id, idBuffer)) {
 			throw new TransportException("Incorrect hash for " + id.name()
 					+ "; computed " + idBuffer.name() + " as a "
-					+ Constants.encodedTypeString(uol.getType()) + " from "
+					+ Constants.typeString(uol.getType()) + " from "
 					+ compressed.length + " bytes.");
 		}
 		if (objCheck != null) {
@@ -596,7 +610,7 @@ class WalkFetchConnection extends BaseFetchConnection {
 				objCheck.check(uol.getType(), uol.getCachedBytes());
 			} catch (CorruptObjectException e) {
 				throw new TransportException("Invalid "
-						+ Constants.encodedTypeString(uol.getType()) + " "
+						+ Constants.typeString(uol.getType()) + " "
 						+ id.name() + ":" + e.getMessage());
 			}
 		}
@@ -857,7 +871,9 @@ class WalkFetchConnection extends BaseFetchConnection {
 			ip.setFixThin(false);
 			ip.setObjectChecker(objCheck);
 			ip.index(monitor);
-			ip.renameAndOpenPack();
+			final PackLock keep = ip.renameAndOpenPack(lockMessage);
+			if (keep != null)
+				packLocks.add(keep);
 		}
 	}
 }

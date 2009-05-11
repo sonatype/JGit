@@ -57,6 +57,7 @@ import org.spearce.jgit.errors.PackProtocolException;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.PackLock;
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.Ref;
 import org.spearce.jgit.lib.RefComparator;
@@ -77,6 +78,8 @@ public class ReceivePack {
 
 	static final String CAPABILITY_DELETE_REFS = BasePackPushConnection.CAPABILITY_DELETE_REFS;
 
+	static final String CAPABILITY_OFS_DELTA = BasePackPushConnection.CAPABILITY_OFS_DELTA;
+
 	/** Database we write the stored objects into. */
 	private final Repository db;
 
@@ -94,6 +97,8 @@ public class ReceivePack {
 
 	/** Should an incoming transfer permit non-fast-forward requests? */
 	private boolean allowNonFastForwards;
+
+	private boolean allowOfsDelta;
 
 	/** Identity to record action as within the reflog. */
 	private PersonIdent refLogIdent;
@@ -129,6 +134,9 @@ public class ReceivePack {
 	/** if {@link #enabledCapablities} has {@link #CAPABILITY_REPORT_STATUS} */
 	private boolean reportStatus;
 
+	/** Lock around the received pack file, while updating refs. */
+	private PackLock packLock;
+
 	/**
 	 * Create a new pack receive for an open repository.
 	 *
@@ -145,6 +153,7 @@ public class ReceivePack {
 		allowDeletes = !cfg.getBoolean("receive", "denydeletes", false);
 		allowNonFastForwards = !cfg.getBoolean("receive",
 				"denynonfastforwards", false);
+		allowOfsDelta = cfg.getBoolean("repack", "usedeltabaseoffset", true);
 		preReceive = PreReceiveHook.NULL;
 		postReceive = PostReceiveHook.NULL;
 	}
@@ -379,6 +388,7 @@ public class ReceivePack {
 					msgs.flush();
 				}
 			} finally {
+				unlockPack();
 				rawIn = null;
 				rawOut = null;
 				pckIn = null;
@@ -416,6 +426,7 @@ public class ReceivePack {
 				validateCommands();
 				executeCommands();
 			}
+			unlockPack();
 
 			if (reportStatus) {
 				sendStatusReport(true, new Reporter() {
@@ -437,6 +448,13 @@ public class ReceivePack {
 		}
 	}
 
+	private void unlockPack() {
+		if (packLock != null) {
+			packLock.unlock();
+			packLock = null;
+		}
+	}
+
 	private void sendAdvertisedRefs() throws IOException {
 		refs = db.getAllRefs();
 
@@ -455,6 +473,10 @@ public class ReceivePack {
 			m.append(CAPABILITY_DELETE_REFS);
 			m.append(' ');
 			m.append(CAPABILITY_REPORT_STATUS);
+			if (allowOfsDelta) {
+				m.append(' ');
+				m.append(CAPABILITY_OFS_DELTA);
+			}
 			m.append(' ');
 			writeAdvertisedRef(m);
 		}
@@ -534,7 +556,11 @@ public class ReceivePack {
 		ip.setFixThin(true);
 		ip.setObjectChecking(isCheckReceivedObjects());
 		ip.index(NullProgressMonitor.INSTANCE);
-		ip.renameAndOpenPack();
+
+		String lockMsg = "jgit receive-pack";
+		if (getRefLogIdent() != null)
+			lockMsg += " from " + getRefLogIdent().toExternalString();
+		packLock = ip.renameAndOpenPack(lockMsg);
 	}
 
 	private void checkConnectivity() throws IOException {
