@@ -3,7 +3,7 @@ package org.spearce.jgit.simple;
 import java.io.File;
 
 /**
- * status a single file (or directory) in the Repository
+ * Status of a single file (or directory) in the Repository
  * 
  * The following situations may appear:
  * <table summary="possible file status cases">
@@ -20,6 +20,9 @@ import java.io.File;
  * 	<tr><td>DELETED</td><td>REMOVED</td><td>deletion got git-added. file is marked as to be removed from the repository.</td></tr>
  * 	<tr><td>UNTRACKED</td><td>UNTRACKED</td><td>deletion got committed</td></tr>				
  * </table>
+ * 
+ * @see SimpleRepository#status()
+ * @see SimpleRepository#status(boolean, boolean)
  */
 public class StatusEntry {
 
