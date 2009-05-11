@@ -1,7 +1,5 @@
 package org.spearce.jgit.simple;
 
-import java.io.File;
-
 /**
  * Status of a single file (or directory) in the Repository
  * 
@@ -19,6 +17,7 @@ import java.io.File;
  * 	<tr><td>DELETED</td><td>ADDED</td><td>file got deleted locally</td></tr>
  * 	<tr><td>DELETED</td><td>REMOVED</td><td>deletion got git-added. file is marked as to be removed from the repository.</td></tr>
  * 	<tr><td>UNTRACKED</td><td>UNTRACKED</td><td>deletion got committed</td></tr>				
+ * 	<tr><td>UNTRACKED</td><td>REMOVED</td><td>still available in the working directory but marked for deletion in the Index, e.g. via `git rm --cached foo`</td></tr>				
  * </table>
  * 
  * @see SimpleRepository#status()
@@ -88,23 +87,17 @@ public class StatusEntry {
 		
 	}
 
-	private File filePath;
+	private String filePath;
 	private IndexStatus indexStatus;
 	private RepoStatus repoStatus;
 	
-	/**
-	 * default ct without setting any members
-	 */
-	public StatusEntry() {
-		// no initialisation
-	}
 	/**
 	 * ct which initialises all the members 
 	 * @param filePath the file/directory the status is for
 	 * @param indexStatus this represents the status of the file in the working directory compared to the Index.
 	 * @param repoStatus the status of the index compared to the repository
 	 */
-	public StatusEntry(File filePath, IndexStatus indexStatus, RepoStatus repoStatus) {
+	public StatusEntry(String filePath, IndexStatus indexStatus, RepoStatus repoStatus) {
 		this.filePath = filePath;
 		this.indexStatus = indexStatus;
 		this.repoStatus = repoStatus;
@@ -113,7 +106,7 @@ public class StatusEntry {
 	/**
 	 * @return file or directory path 
 	 */
-	public File getFilePath() {
+	public String getFilePath() {
 		return filePath;
 	}
 	
@@ -132,5 +125,16 @@ public class StatusEntry {
 	}
 	
 	
-	
+	/**
+	 * String representation of this entry
+	 */
+	public String toString() {
+		StringBuilder sb = new StringBuilder("StatusEntry[");
+		sb.append(filePath);
+		sb.append(", ").append(indexStatus);
+		sb.append(", ").append(repoStatus);
+		sb.append("]");
+		return sb.toString();
+	}
+
 }

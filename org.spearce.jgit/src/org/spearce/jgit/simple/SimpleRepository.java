@@ -78,7 +78,6 @@ import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
-import org.spearce.jgit.lib.WindowCursor;
 import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.RefUpdate.Result;
 import org.spearce.jgit.revwalk.RevWalk;
@@ -702,8 +701,7 @@ public class SimpleRepository {
 			Validate.notNull(currentHeadId, "currentHeadId must not be null!");
 			RevWalk walk = new RevWalk(db);
 			ObjectId treeId = walk.parseTree(currentHeadId);
-			final WindowCursor curs = new WindowCursor();
-			tw.addTree(new CanonicalTreeParser(null, db, treeId, curs));
+			tw.addTree(treeId);
 					
 			while (tw.next()) {
 	
@@ -729,7 +727,7 @@ public class SimpleRepository {
 					// Entry doesn't yet exist in the index nor in the repo but on the FS.  
 					// If its an ignored path name, skip over the entry.
 					if (!ignores.isIgnored(currentFile)) {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.UNTRACKED, RepoStatus.UNTRACKED));
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.UNTRACKED, RepoStatus.UNTRACKED));
 					}
 					continue;
 				} else if (existsInFS && existsInIndex && !existsInRepo) {
@@ -743,59 +741,61 @@ public class SimpleRepository {
 					if (i.getDirCacheEntry().getLength() != d.getEntryLength()
 							|| !timestampMatches(i.getDirCacheEntry(), d)) {
 						if (!d.getEntryObjectId().equals(i.getEntryObjectId())) {
-							statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.UNTRACKED));
+							statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.MODIFIED, RepoStatus.UNTRACKED));
 							continue;
 						} else {
-							statusList.add(new StatusEntry(currentFile, IndexStatus.ADDED, RepoStatus.UNTRACKED));
+							statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.ADDED, RepoStatus.UNTRACKED));
 							continue;
 						}
 					}
-				}
-				else if (!existsInFS && existsInIndex && existsInRepo) {
-					// Entry is no longer in the directory, but is still in the
-					// index and repo. 
-					if (isIndexEqualsRepo(i, r)) {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.UNCHANGED));
+				} else if (!existsInFS && existsInIndex && existsInRepo) {
+					// Entry is no longer in the directory, but is still in the index and repo.
+					// So compare Index to Repository
+					if (tw.idEqual(1, 2)) {
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.DELETED, RepoStatus.UNCHANGED));
 					}
 					else {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.ADDED));
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.DELETED, RepoStatus.ADDED));
 					}
 					continue;
-				}
-				else if (existsInFS && existsInIndex && existsInRepo) {
+				} else if (existsInFS && existsInIndex && existsInRepo) {
 					// the current file is already in the repo
-					boolean fsEqualsIndex = isFsEqualsIndex(d, i);
-					boolean indexEqualsRepo = isIndexEqualsRepo(i, r);
+					boolean fsEqualsIndex = tw.idEqual(0, 1);
+					boolean indexEqualsRepo = tw.idEqual(1, 2);
 					if (!fsEqualsIndex && !indexEqualsRepo) {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.ADDED));
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.MODIFIED, RepoStatus.ADDED));
 						continue;
 					} else if (!fsEqualsIndex && indexEqualsRepo) {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.UNCHANGED));
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.MODIFIED, RepoStatus.UNCHANGED));
 						continue;
 					} else if (fsEqualsIndex && !indexEqualsRepo) {
-						statusList.add(new StatusEntry(currentFile, IndexStatus.ADDED, RepoStatus.ADDED));
+						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.ADDED, RepoStatus.ADDED));
 						continue;
 					} else if (fsEqualsIndex && indexEqualsRepo) {
 						if (listUnchanged) {
-							statusList.add(new StatusEntry(currentFile, IndexStatus.UNCHANGED, RepoStatus.UNCHANGED));
+							statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.UNCHANGED, RepoStatus.UNCHANGED));
 						}
 						continue;
 					}
-				}
-				else if (!existsInFS && existsInIndex && !existsInRepo) {
+				} else if (!existsInFS && existsInIndex && !existsInRepo) {
 					// file has been git-added, then rm-ed from the filesystem again
-					statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.UNTRACKED));
+					statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.DELETED, RepoStatus.UNTRACKED));
 					continue;
-				}
-				else if (!existsInFS && !existsInIndex && existsInRepo) {
+				} else if (!existsInFS && !existsInIndex && existsInRepo) {
 					// must have been git-added, then rm-ed from the filesystem again
-					statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.REMOVED));
+					statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.DELETED, RepoStatus.REMOVED));
+					continue;
+				} else if (existsInFS && !existsInIndex && existsInRepo) {
+					// still available in the working directory but marked for deletion 
+					// in the Index, e.g. via `git rm --cached foo`
+					statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.UNTRACKED, RepoStatus.REMOVED));
 					continue;
 				}
 	
 				//X TODO still many use cases missing!
 				
-				// if we get to this very point, then we've missed a usecase! So let's throw a verbose RuntimeException 
+				// if we get to this very point, then we've missed a usecase! So let's throw a verbose RuntimeException
+				// or at least print the circumstances if lenient==true
 				StringBuilder errorMsg = new StringBuilder("this JGit status usecase is not yet evaluated!\n repoPath=");
 				errorMsg.append(tw.getPathString());
 				if (existsInFS) {
@@ -807,10 +807,10 @@ public class SimpleRepository {
 				if (existsInRepo) {
 					errorMsg.append("\n exsists in REPO  ObjectId=").append(r.getEntryObjectId());
 				}
+				
 				if (lenient) {
 					System.out.println(errorMsg);
-				}
-				else {
+				} else {
 					throw new RuntimeException(errorMsg.toString());
 				}
 	
@@ -1029,26 +1029,6 @@ public class SimpleRepository {
 		String commitStr = amending ? "\tcommit (amend):" : "\tcommit: ";
 		String message = commitStr + firstLine;
 		return message;
-	}
-
-	/**
-	 * Compare the state of the file in fileSystem with the state of it in the index
-	 * @param d
-	 * @param i
-	 * @return <code>true</code> if the underlying item is the same
-	 */
-	private boolean isFsEqualsIndex(FileTreeIterator d, DirCacheIterator i) {
-		return d.getEntryObjectId().equals(i.getEntryObjectId());
-	}
-
-	/**
-	 * Compare the current item in the Index and in the Repository.
-	 * @param i
-	 * @param r
-	 * @return <code>true</code> if the underlying item is the same
-	 */
-	private boolean isIndexEqualsRepo(DirCacheIterator i, CanonicalTreeParser r) {
-		return r.getEntryObjectId().equals(i.getEntryObjectId());
 	}
 
 }
