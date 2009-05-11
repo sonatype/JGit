@@ -174,7 +174,7 @@ public class SimpleRepository {
 		repo.initRepository(workDir, ".git");
 		
 		if (monitor == null) {
-			monitor = new NullProgressMonitor();
+			monitor = NullProgressMonitor.INSTANCE;
 		}
 
 		repo.addRemote(remoteName, uri, branch, true, null);
@@ -326,7 +326,7 @@ public class SimpleRepository {
 		Validate.notNull(uri, "URI to fetch from must not be null!");
 		
 		if (monitor == null) {
-			monitor = new NullProgressMonitor();
+			monitor = NullProgressMonitor.INSTANCE;
 		}
 		
 		final Transport tn = Transport.open(db, uri);
@@ -465,7 +465,7 @@ public class SimpleRepository {
 		Validate.isTrue(uri != null || remoteName != null, "either uri or remoteName must be set!");
 		
 		if (monitor == null) {
-			monitor = new NullProgressMonitor();
+			monitor = NullProgressMonitor.INSTANCE;
 		}
 		
 		if (remoteBranchName == null) {
