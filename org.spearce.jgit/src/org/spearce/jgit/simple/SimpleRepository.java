@@ -56,6 +56,7 @@ import org.spearce.jgit.dircache.DirCache;
 import org.spearce.jgit.dircache.DirCacheBuildIterator;
 import org.spearce.jgit.dircache.DirCacheBuilder;
 import org.spearce.jgit.dircache.DirCacheEntry;
+import org.spearce.jgit.dircache.DirCacheIterator;
 import org.spearce.jgit.errors.CommitException;
 import org.spearce.jgit.errors.CorruptObjectException;
 import org.spearce.jgit.errors.NotSupportedException;
@@ -77,9 +78,13 @@ import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
 import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
+import org.spearce.jgit.lib.WindowCursor;
 import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.RefUpdate.Result;
-import org.spearce.jgit.simple.LsFileEntry.FileStatus;
+import org.spearce.jgit.revwalk.RevWalk;
+import org.spearce.jgit.simple.LsFileEntry.LsFileStatus;
+import org.spearce.jgit.simple.StatusEntry.IndexStatus;
+import org.spearce.jgit.simple.StatusEntry.RepoStatus;
 import org.spearce.jgit.transport.FetchResult;
 import org.spearce.jgit.transport.PushResult;
 import org.spearce.jgit.transport.RefSpec;
@@ -88,6 +93,7 @@ import org.spearce.jgit.transport.RemoteRefUpdate;
 import org.spearce.jgit.transport.Transport;
 import org.spearce.jgit.transport.URIish;
 import org.spearce.jgit.transport.RemoteRefUpdate.Status;
+import org.spearce.jgit.treewalk.CanonicalTreeParser;
 import org.spearce.jgit.treewalk.FileTreeIterator;
 import org.spearce.jgit.treewalk.TreeWalk;
 import org.spearce.jgit.treewalk.filter.PathFilter;
@@ -651,6 +657,172 @@ public class SimpleRepository {
 	}
 
 	/**
+	 * Show the status of the repositories working directory.
+	 * This version throws Exceptions on unknown use cases and will not show untracked files.
+	 * 
+	 * @see #status(boolean, boolean)
+	 * @return List with an StatusEntry for each detected change
+	 * @throws CorruptObjectException
+	 * @throws IOException
+	 */
+	public List<StatusEntry> status() 
+	throws CorruptObjectException, IOException {
+		return status(false, false);
+	}
+	
+	/**
+	 * Show the status of the repositories working directory.
+	 * This works like git-status.
+	 * TODO Unlike the original git-status, untracked subdirectories will listed with all files!
+	 *  
+	 * @param listUnchanged if <code>true</code> also files which have not been changed will
+	 *        be reportes. They get the status 
+	 *        {@code IndexStatus#UNCHANGED} / {@code RepoStatus#UNCHANGED}
+	 * @param lenient if <code>true</code> this function will not throw a 'unknown usecase' exception but log to stdout instead!
+	 * @return List with an StatusEntry for each detected change
+	 * @throws IOException 
+	 * @throws CorruptObjectException 
+	 */
+	public List<StatusEntry> status(boolean listUnchanged, boolean lenient) 
+	throws CorruptObjectException, IOException {
+		final List<StatusEntry> statusList = new ArrayList<StatusEntry>();
+		File root = db.getWorkDir();
+		
+		final TreeWalk tw = new TreeWalk(db);
+		tw.reset();
+		tw.setFilter(TreeFilter.ALL);
+
+		final DirCache dc = DirCache.lock(db);
+
+		try {
+			tw.addTree(new FileTreeIterator(root));
+			tw.addTree(new DirCacheIterator(dc));
+			
+			ObjectId currentHeadId = db.resolve(Constants.HEAD);
+			Validate.notNull(currentHeadId, "currentHeadId must not be null!");
+			RevWalk walk = new RevWalk(db);
+			ObjectId treeId = walk.parseTree(currentHeadId);
+			final WindowCursor curs = new WindowCursor();
+			tw.addTree(new CanonicalTreeParser(null, db, treeId, curs));
+					
+			while (tw.next()) {
+	
+				if (tw.isSubtree()) {
+					// The index doesn't allow trees directly, we need to
+					// recurse and process only leaf nodes.
+					//
+					tw.enterSubtree();
+					continue;
+				}
+	
+				final boolean existsInFS    = tw.getRawMode(0) != 0; 
+				final boolean existsInIndex = tw.getRawMode(1) != 0; 
+				final boolean existsInRepo  = tw.getRawMode(2) != 0; 
+
+				final FileTreeIterator    d = tw.getTree(0, FileTreeIterator.class);
+				final DirCacheIterator    i = tw.getTree(1, DirCacheIterator.class);
+				final CanonicalTreeParser r = tw.getTree(2, CanonicalTreeParser.class);
+				
+				final File currentFile = new File(root, tw.getPathString());
+	
+				if (existsInFS && !existsInIndex && !existsInRepo) {
+					// Entry doesn't yet exist in the index nor in the repo but on the FS.  
+					// If its an ignored path name, skip over the entry.
+					if (!ignores.isIgnored(currentFile)) {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.UNTRACKED, RepoStatus.UNTRACKED));
+					}
+					continue;
+				} else if (existsInFS && existsInIndex && !existsInRepo) {
+					final FileMode mode = d.getEntryFileMode();
+					if (FileMode.GITLINK.equals(mode)) {
+						// TODO: FileTreeIterator doesn't implement objectId right
+						// for a GITLINK yet.
+						continue;
+					} 
+					
+					if (i.getDirCacheEntry().getLength() != d.getEntryLength()
+							|| !timestampMatches(i.getDirCacheEntry(), d)) {
+						if (!d.getEntryObjectId().equals(i.getEntryObjectId())) {
+							statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.UNTRACKED));
+							continue;
+						} else {
+							statusList.add(new StatusEntry(currentFile, IndexStatus.ADDED, RepoStatus.UNTRACKED));
+							continue;
+						}
+					}
+				}
+				else if (!existsInFS && existsInIndex && existsInRepo) {
+					// Entry is no longer in the directory, but is still in the
+					// index and repo. 
+					if (isIndexEqualsRepo(i, r)) {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.UNCHANGED));
+					}
+					else {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.ADDED));
+					}
+					continue;
+				}
+				else if (existsInFS && existsInIndex && existsInRepo) {
+					// the current file is already in the repo
+					boolean fsEqualsIndex = isFsEqualsIndex(d, i);
+					boolean indexEqualsRepo = isIndexEqualsRepo(i, r);
+					if (!fsEqualsIndex && !indexEqualsRepo) {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.ADDED));
+						continue;
+					} else if (!fsEqualsIndex && indexEqualsRepo) {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.MODIFIED, RepoStatus.UNCHANGED));
+						continue;
+					} else if (fsEqualsIndex && !indexEqualsRepo) {
+						statusList.add(new StatusEntry(currentFile, IndexStatus.ADDED, RepoStatus.ADDED));
+						continue;
+					} else if (fsEqualsIndex && indexEqualsRepo) {
+						if (listUnchanged) {
+							statusList.add(new StatusEntry(currentFile, IndexStatus.UNCHANGED, RepoStatus.UNCHANGED));
+						}
+						continue;
+					}
+				}
+				else if (!existsInFS && existsInIndex && !existsInRepo) {
+					// file has been git-added, then rm-ed from the filesystem again
+					statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.UNTRACKED));
+					continue;
+				}
+				else if (!existsInFS && !existsInIndex && existsInRepo) {
+					// must have been git-added, then rm-ed from the filesystem again
+					statusList.add(new StatusEntry(currentFile, IndexStatus.DELETED, RepoStatus.REMOVED));
+					continue;
+				}
+	
+				//X TODO still many use cases missing!
+				
+				// if we get to this very point, then we've missed a usecase! So let's throw a verbose RuntimeException 
+				StringBuilder errorMsg = new StringBuilder("this JGit status usecase is not yet evaluated!\n repoPath=");
+				errorMsg.append(tw.getPathString());
+				if (existsInFS) {
+					errorMsg.append("\n exsists in FS    ObjectId=").append(d.getEntryObjectId());
+				}
+				if (existsInIndex) {
+					errorMsg.append("\n exsists in INDEX ObjectId=").append(i.getEntryObjectId());
+				}
+				if (existsInRepo) {
+					errorMsg.append("\n exsists in REPO  ObjectId=").append(r.getEntryObjectId());
+				}
+				if (lenient) {
+					System.out.println(errorMsg);
+				}
+				else {
+					throw new RuntimeException(errorMsg.toString());
+				}
+	
+			}
+		} finally {
+			dc.unlock();
+		}
+		
+		return statusList;
+	}
+	
+	/**
 	 * Show information about files in the Index and the working tree.
 	 * TODO this doesn't currently work like git-ls-files but more like a mixture of that and git-status...
 	 * @return list of all files 
@@ -667,7 +839,7 @@ public class SimpleRepository {
 			final DirCacheEntry ent = cache.getEntry(i);
 			
 			//X TODO this is surely not enough ;)
-			FileStatus fs = FileStatus.CACHED;
+			LsFileStatus fs = LsFileStatus.CACHED;
 			LsFileEntry fileEntry = new LsFileEntry(ent.getPathString(), fs, ent.getObjectId());
 			cachedEntries.put(ent.getPathString(), fileEntry);
 		}
@@ -705,13 +877,13 @@ public class SimpleRepository {
 			}
 			
 			if (cachedPath != null && !fileEntries.contains(cachedPath)) {
-				fileEntries.add(new LsFileEntry(cachedPath, FileStatus.REMOVED,  null));
+				fileEntries.add(new LsFileEntry(cachedPath, LsFileStatus.REMOVED,  null));
 				cachedPath = null;
 				continue;
 			}
 			
 			if (fsPath != null && !cachedEntries.keySet().contains(fsPath)) {
-				fileEntries.add(new LsFileEntry(fsPath, FileStatus.OTHER,  null));
+				fileEntries.add(new LsFileEntry(fsPath, LsFileStatus.OTHER,  null));
 				fsPath = null;
 				continue;
 			}
@@ -746,8 +918,7 @@ public class SimpleRepository {
 	// private helper functions
 	//------------------------------------
 	
-	private static boolean timestampMatches(final DirCacheEntry indexEntry,
-			final FileTreeIterator workEntry) {
+	private static boolean timestampMatches(final DirCacheEntry indexEntry,	final FileTreeIterator workEntry) {
 		final long tIndex = indexEntry.getLastModified();
 		final long tWork = workEntry.getEntryLastModified();
 
@@ -858,6 +1029,26 @@ public class SimpleRepository {
 		String commitStr = amending ? "\tcommit (amend):" : "\tcommit: ";
 		String message = commitStr + firstLine;
 		return message;
+	}
+
+	/**
+	 * Compare the state of the file in fileSystem with the state of it in the index
+	 * @param d
+	 * @param i
+	 * @return <code>true</code> if the underlying item is the same
+	 */
+	private boolean isFsEqualsIndex(FileTreeIterator d, DirCacheIterator i) {
+		return d.getEntryObjectId().equals(i.getEntryObjectId());
+	}
+
+	/**
+	 * Compare the current item in the Index and in the Repository.
+	 * @param i
+	 * @param r
+	 * @return <code>true</code> if the underlying item is the same
+	 */
+	private boolean isIndexEqualsRepo(DirCacheIterator i, CanonicalTreeParser r) {
+		return r.getEntryObjectId().equals(i.getEntryObjectId());
 	}
 
 }

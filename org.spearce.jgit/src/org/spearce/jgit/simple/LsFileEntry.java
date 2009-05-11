@@ -49,7 +49,7 @@ public class LsFileEntry {
 	/**
 	 * Possible status of each file 
 	 */
-	public static enum FileStatus {
+	public static enum LsFileStatus {
 		/**
 		 * file is cached in the Index 
 		 */
@@ -76,22 +76,22 @@ public class LsFileEntry {
 		OTHER
 	}
 	
-	private String 	   filePath;
-	private FileStatus status;
-	private ObjectId   objectId;
+	private String 	     filePath;
+	private LsFileStatus status;
+	private ObjectId     objectId;
 
 	/**
 	 * @param filePath
 	 * @param status
 	 * @param objectId
 	 */
-	public LsFileEntry(String filePath, FileStatus status, ObjectId objectId) {
+	public LsFileEntry(String filePath, LsFileStatus status, ObjectId objectId) {
 		Validate.notNull(filePath, "filePath must not be null");
 		
 		this.filePath = filePath;
 		
 		if (status == null) {
-			this.status = FileStatus.OTHER;
+			this.status = LsFileStatus.OTHER;
 		}
 		else {
 			this.status = status;
@@ -119,14 +119,14 @@ public class LsFileEntry {
 	/**
 	 * @return status of this entry
 	 */
-	public FileStatus getStatus() {
+	public LsFileStatus getStatus() {
 		return status;
 	}
 	
 	/**
 	 * @param status of this entry
 	 */
-	public void setStatus(FileStatus status) {
+	public void setStatus(LsFileStatus status) {
 		this.status = status;
 	}
 	

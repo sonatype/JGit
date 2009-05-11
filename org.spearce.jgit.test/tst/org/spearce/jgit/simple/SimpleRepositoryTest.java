@@ -48,6 +48,8 @@ import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.RepositoryTestCase;
 import org.spearce.jgit.lib.GitIndex.Entry;
+import org.spearce.jgit.simple.StatusEntry.IndexStatus;
+import org.spearce.jgit.simple.StatusEntry.RepoStatus;
 import org.spearce.jgit.transport.URIish;
 
 /**
@@ -163,6 +165,33 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 			System.out.println("LsFileEntry[" + i + "]: " + entries.get(i));
 		}
 		assertEquals(9, entries.size());
+	}
+	
+	public void testStatus() throws Exception {
+		SimpleRepository srep = cloneTestRepository();
+		List<StatusEntry> status = srep.status(false, false);
+		assertNotNull(status);
+		assertEquals("without changes, status has to return an empty list", 0, status.size());
+		
+		// now we create a file in the local directory!
+		final String fileNameToAdd = "myNewFile.txt";
+		File fileToAdd = createNewFile(srep, fileNameToAdd, "This File will be added, sic!");
+		status = srep.status(false, false);
+		assertNotNull(status);
+		assertEquals("status now should contain the added file, thus 1 entry!", 1, status.size());
+		assertEquals(IndexStatus.UNTRACKED, status.get(0).getIndexStatus());
+		assertEquals(RepoStatus.UNTRACKED, status.get(0).getRepoStatus());
+		
+		// now we add this file to the Index
+		srep.add(fileToAdd, false);
+		status = srep.status(false, false);
+		assertNotNull(status);
+		assertEquals("status now should still contain the added file, but different status!", 1, status.size());
+		assertEquals(IndexStatus.ADDED, status.get(0).getIndexStatus());
+		assertEquals(RepoStatus.UNTRACKED, status.get(0).getRepoStatus());
+
+		
+		//X TODO test remove
 	}
 	
 	private SimpleRepository cloneTestRepository() 
