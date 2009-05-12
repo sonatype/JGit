@@ -164,7 +164,7 @@ public class Main {
 	}
 
 	private static File findGitDir() {
-		File current = new File(".").getAbsoluteFile();
+		File current = new File(System.getProperty("user.dir"));
 		while (current != null) {
 			final File gitDir = new File(current, ".git");
 			if (gitDir.isDirectory())
