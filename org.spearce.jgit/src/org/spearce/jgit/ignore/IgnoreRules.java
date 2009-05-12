@@ -160,7 +160,7 @@ public class IgnoreRules {
 				FileInputStream fis = null;
 				try {
 					fis =  new FileInputStream(gitignore);
-					if (parseGitIgnore(new FileInputStream(gitignore), parseDir, toCheckFor)) {
+					if (parseGitIgnore(fis, parseDir, toCheckFor)) {
 						return true;
 					}
 				}
