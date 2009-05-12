@@ -100,6 +100,7 @@ public class IgnoreRules {
 		Validate.notNull(toCheckFor, "file to check for ignore must not be null!");
 		
 		// ignore /.git in any case
+		//X TODO evaluate GIT_DIR environment variable!
 		if (toCheckFor.getParentFile().equals(db.getWorkDir()) && toCheckFor.getName().equals(".git")) {
 			return true;
 		}
@@ -113,26 +114,6 @@ public class IgnoreRules {
 		//X TODO check core.excludefiles
 		
 		return false;
-	}
-
-	/**
-	 * Add an ignore entry for the given file or directory.
-	 * The location defines on which level the ignore rule should be applied.
-	 * @param location
-	 * @param toIgnore
-	 */
-	public void addIgnore(IgnoreLocation location, File toIgnore) {
-		//X TODO
-	}
-
-	/**
-	 * Add an general ignore rule entry.
-	 * The location defines on which level the ignore rule should be applied.
-	 * @param location
-	 * @param ignoreRule
-	 */
-	public void addIgnore(IgnoreLocation location, String ignoreRule) {
-		//X TODO
 	}
 
 	
@@ -189,7 +170,7 @@ public class IgnoreRules {
 	throws IOException {
 		BufferedReader br = new BufferedReader(new InputStreamReader(gitignore));
 		String line;
-		if ((line = br.readLine()) != null) {
+		while ((line = br.readLine()) != null) {
 			if (parseLine(line, currentDir, toCheckFor)) {
 				return true;
 			}
@@ -249,7 +230,8 @@ public class IgnoreRules {
 				return matchResult;
 			}
 		} else {
-			if (pattern.equals(toCheckFor.getName())) {
+			String repoPath = toCheckFor.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
+			if (repoPath.contains(File.separator + pattern + File.separator) || toCheckFor.getName().equals(pattern)) {
 				return matchResult;
 			}
 		}

@@ -722,13 +722,14 @@ public class SimpleRepository {
 				final CanonicalTreeParser r = tw.getTree(2, CanonicalTreeParser.class);
 				
 				final File currentFile = new File(root, tw.getPathString());
-	
+				if (ignores.isIgnored(currentFile)) {
+					continue;
+				}
+				
 				if (existsInFS && !existsInIndex && !existsInRepo) {
 					// Entry doesn't yet exist in the index nor in the repo but on the FS.  
 					// If its an ignored path name, skip over the entry.
-					if (!ignores.isIgnored(currentFile)) {
-						statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.UNTRACKED, RepoStatus.UNTRACKED));
-					}
+					statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.UNTRACKED, RepoStatus.UNTRACKED));
 					continue;
 				} else if (existsInFS && existsInIndex && !existsInRepo) {
 					final FileMode mode = d.getEntryFileMode();
