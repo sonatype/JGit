@@ -570,7 +570,7 @@ public class SimpleRepository {
 		final String rootCanon = root.getCanonicalPath();
 		
 		Validate.isTrue(toAddCanon.startsWith(rootCanon),
-				"File toAdd must be within repository {0}!", root);
+				"File toAdd must be within repository {0} but is {1}!", root, toAdd);
 
 		final ObjectWriter ow = new ObjectWriter(db);
 		final DirCache dc = DirCache.lock(db);
@@ -743,12 +743,11 @@ public class SimpleRepository {
 							|| !timestampMatches(i.getDirCacheEntry(), d)) {
 						if (!d.getEntryObjectId().equals(i.getEntryObjectId())) {
 							statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.MODIFIED, RepoStatus.UNTRACKED));
-							continue;
 						} else {
 							statusList.add(new StatusEntry(tw.getPathString(), IndexStatus.ADDED, RepoStatus.UNTRACKED));
-							continue;
 						}
 					}
+					continue;
 				} else if (!existsInFS && existsInIndex && existsInRepo) {
 					// Entry is no longer in the directory, but is still in the index and repo.
 					// So compare Index to Repository
