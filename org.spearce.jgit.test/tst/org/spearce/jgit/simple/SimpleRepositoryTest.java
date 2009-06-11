@@ -190,8 +190,34 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 		assertEquals(IndexStatus.ADDED, status.get(0).getIndexStatus());
 		assertEquals(RepoStatus.UNTRACKED, status.get(0).getRepoStatus());
 
-		
 		//X TODO test remove
+	}
+	
+	public void testRevList() throws Exception {
+		SimpleRepository srep = cloneTestRepository();
+		List<String> revisions = srep.revList(null, null, null, null, null, -1);
+		assertNotNull(revisions);
+		assertTrue(!revisions.isEmpty());
+		for (String rev : revisions) {
+			System.out.println(rev);
+		}
+	}
+	
+	public void testWhatchanged() throws Exception {
+		SimpleRepository srep = cloneTestRepository();
+		List<ChangeEntry> revisions = srep.whatchanged(null, null, null, null, null, -1);
+		assertNotNull(revisions);
+		assertTrue(!revisions.isEmpty());
+		for (ChangeEntry ce : revisions) {
+			System.out.println(ce);
+			System.out.println("commit" + ce.getCommitHash());
+			System.out.println("Author: " + ce.getAuthorName() + "<" + ce.getAuthorEmail() + ">");
+			System.out.println("AuthorDate: " + ce.getAuthorDate());
+			System.out.println("Commit: " + ce.getCommitterName() + "<" + ce.getCommitterEmail() + ">");
+			System.out.println("CommitDate: " + ce.getCommitterDate());
+			System.out.println("\n" + ce.getSubject());
+			System.out.println("\n" + ce.getBody());
+		}
 	}
 	
 	private SimpleRepository cloneTestRepository() 

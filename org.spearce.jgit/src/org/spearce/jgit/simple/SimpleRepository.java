@@ -59,6 +59,8 @@ import org.spearce.jgit.dircache.DirCacheEntry;
 import org.spearce.jgit.dircache.DirCacheIterator;
 import org.spearce.jgit.errors.CommitException;
 import org.spearce.jgit.errors.CorruptObjectException;
+import org.spearce.jgit.errors.IncorrectObjectTypeException;
+import org.spearce.jgit.errors.MissingObjectException;
 import org.spearce.jgit.errors.NotSupportedException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
 import org.spearce.jgit.errors.TransportException;
@@ -80,6 +82,9 @@ import org.spearce.jgit.lib.RepositoryConfig;
 import org.spearce.jgit.lib.Tree;
 import org.spearce.jgit.lib.WorkDirCheckout;
 import org.spearce.jgit.lib.RefUpdate.Result;
+import org.spearce.jgit.revwalk.RevCommit;
+import org.spearce.jgit.revwalk.RevFlag;
+import org.spearce.jgit.revwalk.RevSort;
 import org.spearce.jgit.revwalk.RevWalk;
 import org.spearce.jgit.simple.LsFileEntry.LsFileStatus;
 import org.spearce.jgit.simple.StatusEntry.IndexStatus;
@@ -895,7 +900,74 @@ public class SimpleRepository {
 		
 		return fileEntries;
 	}
+
+	/**
+	 * Query all revisions from the repository which fits the given criteria.
+	 * 
+	 * @param sortings 
+	 * @param fromRev  
+	 * @param toRev 
+	 * @param fromDate 
+	 * @param toDate
+	 * @param maxLines maximum lines to report or <code>-1</code> for infinite lines to return 
+	 * @return all the revisions in the repository as a List
+	 * @throws IOException 
+	 */
+	public List<String> revList(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines) 
+	throws IOException {
+		List<String> revisions = new ArrayList<String>();
+		List<RevCommit> revs = getRevCommits(sortings, fromRev, toRev, fromDate, toDate, maxLines);
+
+		for (RevCommit c : revs) {
+			revisions.add(c.getId().name());
+		}
+		return revisions;
+	}
+
+	/**
+	 * Show logs with difference each commit introduces
+	 * This works like git-whatchanged
+	 * @param sortings 
+	 * @param fromRev 
+	 * @param toRev 
+	 * @param fromDate 
+	 * @param toDate 
+	 * @param maxLines 
+	 * @return list with {@code ChangeEntry}s
+	 * @throws IOException 
+	 * @throws IncorrectObjectTypeException 
+	 * @throws MissingObjectException 
+	 */
+	public List<ChangeEntry> whatchanged(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines) 
+	throws MissingObjectException, IncorrectObjectTypeException, IOException {
+		List<ChangeEntry> changes = new ArrayList<ChangeEntry>();
+		List<RevCommit> revs = getRevCommits(sortings, fromRev, toRev, fromDate, toDate, maxLines);
+
+		for (RevCommit c : revs) {
+			ChangeEntry ce = new ChangeEntry();
+			
+			ce.setAuthorDate(c.getAuthorIdent().getWhen());
+			ce.setAuthorEmail(c.getAuthorIdent().getEmailAddress());
+			ce.setAuthorName(c.getAuthorIdent().getName());
+			ce.setCommitterDate(c.getCommitterIdent().getWhen());
+			ce.setCommitterEmail(c.getCommitterIdent().getEmailAddress());
+			ce.setCommitterName(c.getCommitterIdent().getName());
+			
+			ce.setSubject(c.getShortMessage());
+			ce.setBody(c.getFullMessage());
+
+			ce.setCommitHash(c.getId().name());
+			ce.setTreeHash(c.getTree().getId().name());
+			
+			changes.add(ce);
+		}
+
+		return changes;
+	}
 	
+	//------------------------------------
+	// private helper functions
+	//------------------------------------
 	
 	private void addFiles(Set<String> filesOnDisk, String baseDir, File curDir) 
 	throws FileNotFoundException, IOException {
@@ -914,10 +986,6 @@ public class SimpleRepository {
 		
 	}
 
-	//------------------------------------
-	// private helper functions
-	//------------------------------------
-	
 	private static boolean timestampMatches(final DirCacheEntry indexEntry,	final FileTreeIterator workEntry) {
 		final long tIndex = indexEntry.getLastModified();
 		final long tWork = workEntry.getEntryLastModified();
@@ -1030,5 +1098,74 @@ public class SimpleRepository {
 		String message = commitStr + firstLine;
 		return message;
 	}
+
+	/**
+	 * get all the {@code RevCommit}s based on the given criterias.
+	 * 
+	 * @see #revList(RevSort[], String, String, String, String, int)
+	 * @see #whatchanged(RevSort[], String, String, String, String, int)
+	 * @param sortings
+	 * @param fromRev
+	 * @param toRev
+	 * @param fromDate
+	 * @param toDate
+	 * @param maxLines
+	 * @return list of {@code RevCommit}s for the given criterias
+	 * @throws IOException
+	 * @throws MissingObjectException
+	 * @throws IncorrectObjectTypeException
+	 */
+	private List<RevCommit> getRevCommits(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines)
+	throws IOException, MissingObjectException,	IncorrectObjectTypeException {
+		List<RevCommit> revs = new ArrayList<RevCommit>();
+		RevWalk walk = new RevWalk(db);
+		
+		ObjectId fromRevId = fromRev != null ? db.resolve(fromRev) : null;
+		ObjectId toRevId    = toRev != null ? db.resolve(toRev) : null;
+		
+		if (sortings == null || sortings.length == 0) {
+			sortings = new RevSort[]{RevSort.TOPO, RevSort.COMMIT_TIME_DESC};
+		}
+		
+		for (final RevSort s : sortings) {
+			walk.sort(s, true);
+		}
+		
+		List<RevCommit> commits = new ArrayList<RevCommit>();
+		
+		if (fromRevId != null) {
+			commits.add(walk.parseCommit(fromRevId));
+		}
+		
+		if (toRevId != null) {
+			commits.add(walk.parseCommit(toRevId));
+		} else {
+			final ObjectId head = db.resolve(Constants.HEAD);
+			if (head == null) {
+				throw new RuntimeException("Cannot resolve " + Constants.HEAD);
+			}
+			commits.add(walk.parseCommit(head));
+		}
+
+		for (final RevCommit c : commits) {
+			RevCommit real = walk.parseCommit(c);
+			if (c.has(RevFlag.UNINTERESTING))
+				walk.markUninteresting(real);
+			else
+				walk.markStart(real);
+		}
+		
+		int n = 0;
+		for (final RevCommit c : walk) {
+			n++;
+			if (maxLines != -1 && n > maxLines) {
+				break;
+			}
+			
+			revs.add(c);
+		}
+		return revs;
+	}
+
 
 }
