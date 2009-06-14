@@ -1131,30 +1131,27 @@ public class SimpleRepository {
 			walk.sort(s, true);
 		}
 		
-		List<RevCommit> commits = new ArrayList<RevCommit>();
-		
 		if (fromRevId != null) {
-			commits.add(walk.parseCommit(fromRevId));
+			RevCommit c = walk.parseCommit(fromRevId);
+			c.add(RevFlag.UNINTERESTING);
+			RevCommit real = walk.parseCommit(c);
+			walk.markUninteresting(real);
 		}
 		
 		if (toRevId != null) {
-			commits.add(walk.parseCommit(toRevId));
+			RevCommit c = walk.parseCommit(toRevId);
+			c.remove(RevFlag.UNINTERESTING);
+			RevCommit real = walk.parseCommit(c);
+			walk.markStart(real);
 		} else {
 			final ObjectId head = db.resolve(Constants.HEAD);
 			if (head == null) {
 				throw new RuntimeException("Cannot resolve " + Constants.HEAD);
 			}
-			commits.add(walk.parseCommit(head));
+			RevCommit real = walk.parseCommit(head);
+			walk.markStart(real);
 		}
 
-		for (final RevCommit c : commits) {
-			RevCommit real = walk.parseCommit(c);
-			if (c.has(RevFlag.UNINTERESTING))
-				walk.markUninteresting(real);
-			else
-				walk.markStart(real);
-		}
-		
 		int n = 0;
 		for (final RevCommit c : walk) {
 			n++;

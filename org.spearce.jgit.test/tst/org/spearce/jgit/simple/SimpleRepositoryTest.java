@@ -195,11 +195,35 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 	
 	public void testRevList() throws Exception {
 		SimpleRepository srep = cloneTestRepository();
-		List<String> revisions = srep.revList(null, null, null, null, null, -1);
-		assertNotNull(revisions);
-		assertTrue(!revisions.isEmpty());
-		for (String rev : revisions) {
-			System.out.println(rev);
+		{
+			List<String> revisions = srep.revList(null, null, null, null, null, -1);
+			assertNotNull(revisions);
+			assertTrue(!revisions.isEmpty());
+			System.out.println("\nfull revisions");
+			for (String rev : revisions) {
+				System.out.println(rev);
+			}
+			assertEquals(21, revisions.size());
+		}
+		{
+			List<String> revisions = srep.revList(null, "ac7e7e44c1885efb472ad54a78327d66bfc4ecef", null, null, null, -1);
+			assertNotNull(revisions);
+			assertTrue(!revisions.isEmpty());
+			System.out.println("\ntail revisions");
+			for (String rev : revisions) {
+				System.out.println(rev);
+			}
+			assertEquals(19, revisions.size());
+		}
+		{
+			List<String> revisions = srep.revList(null, "42e4e7c5e507e113ebbb7801b16b52cf867b7ce1", "6e1475206e57110fcef4b92320436c1e9872a322", null, null, -1);
+			assertNotNull(revisions);
+			assertTrue(!revisions.isEmpty());
+			System.out.println("\npart revisions");
+			for (String rev : revisions) {
+				System.out.println(rev);
+			}
+			assertEquals(17, revisions.size());
 		}
 	}
 	
