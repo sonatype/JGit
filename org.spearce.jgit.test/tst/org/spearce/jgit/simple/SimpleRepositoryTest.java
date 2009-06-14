@@ -42,6 +42,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
 
 import org.spearce.jgit.lib.Commit;
@@ -224,6 +226,31 @@ public class SimpleRepositoryTest extends RepositoryTestCase {
 				System.out.println(rev);
 			}
 			assertEquals(17, revisions.size());
+		}
+		{
+			SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z"); 
+			Date since = sdf.parse("2005-04-07 15:30:13 -0700");
+			List<String> revisions = srep.revList(null, null, null, since, null, -1);
+			assertNotNull(revisions);
+			assertTrue(!revisions.isEmpty());
+			System.out.println("\npart revisions");
+			for (String rev : revisions) {
+				System.out.println(rev);
+			}
+			assertEquals(3, revisions.size());
+		}
+		{
+			SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z"); 
+			Date since = sdf.parse("2005-04-07 15:30:13 -0700");
+			Date until = sdf.parse("2005-04-07 15:31:30 -0700");
+			List<String> revisions = srep.revList(null, null, null, since, until, -1);
+			assertNotNull(revisions);
+			assertTrue(!revisions.isEmpty());
+			System.out.println("\npart revisions");
+			for (String rev : revisions) {
+				System.out.println(rev);
+			}
+			assertEquals(2, revisions.size());
 		}
 	}
 	

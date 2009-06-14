@@ -45,6 +45,7 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -86,6 +87,7 @@ import org.spearce.jgit.revwalk.RevCommit;
 import org.spearce.jgit.revwalk.RevFlag;
 import org.spearce.jgit.revwalk.RevSort;
 import org.spearce.jgit.revwalk.RevWalk;
+import org.spearce.jgit.revwalk.filter.CommitTimeRevFilter;
 import org.spearce.jgit.simple.LsFileEntry.LsFileStatus;
 import org.spearce.jgit.simple.StatusEntry.IndexStatus;
 import org.spearce.jgit.simple.StatusEntry.RepoStatus;
@@ -913,7 +915,7 @@ public class SimpleRepository {
 	 * @return all the revisions in the repository as a List
 	 * @throws IOException 
 	 */
-	public List<String> revList(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines) 
+	public List<String> revList(RevSort[] sortings, String fromRev, String toRev, Date fromDate, Date toDate, int maxLines) 
 	throws IOException {
 		List<String> revisions = new ArrayList<String>();
 		List<RevCommit> revs = getRevCommits(sortings, fromRev, toRev, fromDate, toDate, maxLines);
@@ -938,7 +940,7 @@ public class SimpleRepository {
 	 * @throws IncorrectObjectTypeException 
 	 * @throws MissingObjectException 
 	 */
-	public List<ChangeEntry> whatchanged(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines) 
+	public List<ChangeEntry> whatchanged(RevSort[] sortings, String fromRev, String toRev, Date fromDate, Date toDate, int maxLines) 
 	throws MissingObjectException, IncorrectObjectTypeException, IOException {
 		List<ChangeEntry> changes = new ArrayList<ChangeEntry>();
 		List<RevCommit> revs = getRevCommits(sortings, fromRev, toRev, fromDate, toDate, maxLines);
@@ -1102,8 +1104,8 @@ public class SimpleRepository {
 	/**
 	 * get all the {@code RevCommit}s based on the given criterias.
 	 * 
-	 * @see #revList(RevSort[], String, String, String, String, int)
-	 * @see #whatchanged(RevSort[], String, String, String, String, int)
+	 * @see #revList(RevSort[], String, String, Date, Date, int)
+	 * @see #whatchanged(RevSort[], String, String, Date, Date, int)
 	 * @param sortings
 	 * @param fromRev
 	 * @param toRev
@@ -1115,7 +1117,7 @@ public class SimpleRepository {
 	 * @throws MissingObjectException
 	 * @throws IncorrectObjectTypeException
 	 */
-	private List<RevCommit> getRevCommits(RevSort[] sortings, String fromRev, String toRev, String fromDate, String toDate, int maxLines)
+	private List<RevCommit> getRevCommits(RevSort[] sortings, String fromRev, String toRev, Date fromDate, Date toDate, int maxLines)
 	throws IOException, MissingObjectException,	IncorrectObjectTypeException {
 		List<RevCommit> revs = new ArrayList<RevCommit>();
 		RevWalk walk = new RevWalk(db);
@@ -1129,6 +1131,19 @@ public class SimpleRepository {
 		
 		for (final RevSort s : sortings) {
 			walk.sort(s, true);
+		}
+
+		if (fromDate != null && toDate != null) {
+			walk.setRevFilter(CommitTimeRevFilter.between(fromDate, toDate));
+		}
+		else {
+			if (fromDate != null) {
+				walk.setRevFilter(CommitTimeRevFilter.after(fromDate));
+			}
+	
+			if (toDate != null) {
+				walk.setRevFilter(CommitTimeRevFilter.before(toDate));
+			}
 		}
 		
 		if (fromRevId != null) {
