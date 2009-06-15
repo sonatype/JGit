@@ -112,6 +112,9 @@ public class UploadPack {
 	/** Objects on both sides, these don't have to be sent. */
 	private final List<RevObject> commonBase = new ArrayList<RevObject>();
 
+	/** null if {@link #commonBase} should be examined again. */
+	private Boolean okToGiveUp;
+
 	/** Marked on objects we sent in our advertisement list. */
 	private final RevFlag ADVERTISED;
 
@@ -137,6 +140,7 @@ public class UploadPack {
 	public UploadPack(final Repository copyFrom) {
 		db = copyFrom;
 		walk = new RevWalk(db);
+		walk.setRetainBody(false);
 
 		ADVERTISED = walk.newFlag("ADVERTISED");
 		WANT = walk.newFlag("WANT");
@@ -270,7 +274,7 @@ public class UploadPack {
 		while (o instanceof RevTag) {
 			// Fully unwrap here so later on we have these already parsed.
 			try {
-				walk.parse(((RevTag) o).getObject());
+				walk.parseHeaders(((RevTag) o).getObject());
 			} catch (IOException err) {
 				return;
 			}
@@ -293,7 +297,7 @@ public class UploadPack {
 				throw eof;
 			}
 
-			if (line.length() == 0)
+			if (line == PacketLineIn.END)
 				break;
 			if (!line.startsWith("want ") || line.length() < 45)
 				throw new PackProtocolException("expected want; got " + line);
@@ -348,7 +352,7 @@ public class UploadPack {
 				throw eof;
 			}
 
-			if (line.length() == 0) {
+			if (line == PacketLineIn.END) {
 				if (commonBase.isEmpty() || multiAck)
 					pckOut.writeString("NAK\n");
 				pckOut.flush();
@@ -395,15 +399,26 @@ public class UploadPack {
 			o.add(PEER_HAS);
 			if (o instanceof RevCommit)
 				((RevCommit) o).carry(PEER_HAS);
-			if (!o.has(COMMON)) {
-				o.add(COMMON);
-				commonBase.add(o);
-			}
+			addCommonBase(o);
 		}
 		return true;
 	}
 
+	private void addCommonBase(final RevObject o) {
+		if (!o.has(COMMON)) {
+			o.add(COMMON);
+			commonBase.add(o);
+			okToGiveUp = null;
+		}
+	}
+
 	private boolean okToGiveUp() throws PackProtocolException {
+		if (okToGiveUp == null)
+			okToGiveUp = Boolean.valueOf(okToGiveUpImp());
+		return okToGiveUp.booleanValue();
+	}
+
+	private boolean okToGiveUpImp() throws PackProtocolException {
 		if (commonBase.isEmpty())
 			return false;
 
@@ -428,13 +443,9 @@ public class UploadPack {
 			if (c == null)
 				break;
 			if (c.has(PEER_HAS)) {
-				if (!c.has(COMMON)) {
-					c.add(COMMON);
-					commonBase.add(c);
-				}
+				addCommonBase(c);
 				return true;
 			}
-			c.dispose();
 		}
 		return false;
 	}

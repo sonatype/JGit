@@ -40,7 +40,6 @@ package org.spearce.jgit.transport;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.Arrays;
 
 import org.spearce.jgit.errors.PackProtocolException;
 import org.spearce.jgit.lib.Constants;
@@ -50,16 +49,7 @@ import org.spearce.jgit.util.NB;
 import org.spearce.jgit.util.RawParseUtils;
 
 class PacketLineIn {
-	private static final byte fromhex[];
-
-	static {
-		fromhex = new byte['f' + 1];
-		Arrays.fill(fromhex, (byte) -1);
-		for (char i = '0'; i <= '9'; i++)
-			fromhex[i] = (byte) (i - '0');
-		for (char i = 'a'; i <= 'f'; i++)
-			fromhex[i] = (byte) ((i - 'a') + 10);
-	}
+	static final String END = new String("") /* must not string pool */;
 
 	static enum AckNackResult {
 		/** NAK */
@@ -101,20 +91,23 @@ class PacketLineIn {
 	String readString() throws IOException {
 		int len = readLength();
 		if (len == 0)
-			return "";
+			return END;
 
-		len -= 5; // length header (4 bytes) and trailing LF.
+		len -= 4; // length header (4 bytes)
+		if (len == 0)
+			return "";
 
 		final byte[] raw = new byte[len];
 		NB.readFully(in, raw, 0, len);
-		readLF();
+		if (raw[len - 1] == '\n')
+			len--;
 		return RawParseUtils.decode(Constants.CHARSET, raw, 0, len);
 	}
 
-	String readStringNoLF() throws IOException {
+	String readStringRaw() throws IOException {
 		int len = readLength();
 		if (len == 0)
-			return "";
+			return END;
 
 		len -= 4; // length header (4 bytes)
 
@@ -123,26 +116,13 @@ class PacketLineIn {
 		return RawParseUtils.decode(Constants.CHARSET, raw, 0, len);
 	}
 
-	private void readLF() throws IOException {
-		if (in.read() != '\n')
-			throw new IOException("Protocol error: expected LF");
-	}
-
 	int readLength() throws IOException {
 		NB.readFully(in, lenbuffer, 0, 4);
 		try {
-			int r = fromhex[lenbuffer[0]] << 4;
-
-			r |= fromhex[lenbuffer[1]];
-			r <<= 4;
-
-			r |= fromhex[lenbuffer[2]];
-			r <<= 4;
-
-			r |= fromhex[lenbuffer[3]];
-			if (r < 0)
+			final int len = RawParseUtils.parseHexInt16(lenbuffer, 0);
+			if (len != 0 && len < 4)
 				throw new ArrayIndexOutOfBoundsException();
-			return r;
+			return len;
 		} catch (ArrayIndexOutOfBoundsException err) {
 			throw new IOException("Invalid packet line header: "
 					+ (char) lenbuffer[0] + (char) lenbuffer[1]

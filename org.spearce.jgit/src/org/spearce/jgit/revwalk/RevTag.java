@@ -45,7 +45,6 @@ import org.spearce.jgit.errors.IncorrectObjectTypeException;
 import org.spearce.jgit.errors.MissingObjectException;
 import org.spearce.jgit.lib.AnyObjectId;
 import org.spearce.jgit.lib.Constants;
-import org.spearce.jgit.lib.ObjectLoader;
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.Tag;
 import org.spearce.jgit.util.MutableInteger;
@@ -70,15 +69,19 @@ public class RevTag extends RevObject {
 	}
 
 	@Override
-	void parse(final RevWalk walk) throws MissingObjectException,
+	void parseHeaders(final RevWalk walk) throws MissingObjectException,
 			IncorrectObjectTypeException, IOException {
-		final ObjectLoader ldr = walk.db.openObject(walk.curs, this);
-		if (ldr == null)
-			throw new MissingObjectException(this, Constants.TYPE_TAG);
-		final byte[] data = ldr.getCachedBytes();
-		if (Constants.OBJ_TAG != ldr.getType())
-			throw new IncorrectObjectTypeException(this, Constants.TYPE_TAG);
-		parseCanonical(walk, data);
+		parseCanonical(walk, loadCanonical(walk));
+	}
+
+	@Override
+	void parseBody(final RevWalk walk) throws MissingObjectException,
+			IncorrectObjectTypeException, IOException {
+		if (buffer == null) {
+			buffer = loadCanonical(walk);
+			if ((flags & PARSED) == 0)
+				parseCanonical(walk, buffer);
+		}
 	}
 
 	void parseCanonical(final RevWalk walk, final byte[] rawTag)
@@ -94,7 +97,9 @@ public class RevTag extends RevObject {
 		int p = pos.value += 4; // "tag "
 		final int nameEnd = RawParseUtils.nextLF(rawTag, p) - 1;
 		name = RawParseUtils.decode(Constants.CHARSET, rawTag, p, nameEnd);
-		buffer = rawTag;
+
+		if (walk.isRetainBody())
+			buffer = rawTag;
 		flags |= PARSED;
 	}
 
@@ -189,7 +194,7 @@ public class RevTag extends RevObject {
 	 * 
 	 * @return object this tag refers to.
 	 */
-	public RevObject getObject() {
+	public final RevObject getObject() {
 		return object;
 	}
 
@@ -198,12 +203,11 @@ public class RevTag extends RevObject {
 	 * 
 	 * @return name of the tag, according to the tag header.
 	 */
-	public String getName() {
+	public final String getName() {
 		return name;
 	}
 
-	public void dispose() {
-		flags &= ~PARSED;
+	final void disposeBody() {
 		buffer = null;
 	}
 }

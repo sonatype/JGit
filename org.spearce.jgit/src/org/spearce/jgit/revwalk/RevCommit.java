@@ -46,15 +46,12 @@ import org.spearce.jgit.lib.AnyObjectId;
 import org.spearce.jgit.lib.Commit;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.MutableObjectId;
-import org.spearce.jgit.lib.ObjectLoader;
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.util.RawParseUtils;
 
 /** A commit reference to a commit in the DAG. */
 public class RevCommit extends RevObject {
 	static final RevCommit[] NO_PARENTS = {};
-
-	private static final String TYPE_COMMIT = Constants.TYPE_COMMIT;
 
 	private RevTree tree;
 
@@ -77,15 +74,19 @@ public class RevCommit extends RevObject {
 	}
 
 	@Override
-	void parse(final RevWalk walk) throws MissingObjectException,
+	void parseHeaders(final RevWalk walk) throws MissingObjectException,
 			IncorrectObjectTypeException, IOException {
-		final ObjectLoader ldr = walk.db.openObject(walk.curs, this);
-		if (ldr == null)
-			throw new MissingObjectException(this, TYPE_COMMIT);
-		final byte[] data = ldr.getCachedBytes();
-		if (Constants.OBJ_COMMIT != ldr.getType())
-			throw new IncorrectObjectTypeException(this, TYPE_COMMIT);
-		parseCanonical(walk, data);
+		parseCanonical(walk, loadCanonical(walk));
+	}
+
+	@Override
+	void parseBody(final RevWalk walk) throws MissingObjectException,
+			IncorrectObjectTypeException, IOException {
+		if (buffer == null) {
+			buffer = loadCanonical(walk);
+			if ((flags & PARSED) == 0)
+				parseCanonical(walk, buffer);
+		}
 	}
 
 	void parseCanonical(final RevWalk walk, final byte[] raw) {
@@ -134,7 +135,8 @@ public class RevCommit extends RevObject {
 			commitTime = RawParseUtils.parseBase10(raw, ptr, null);
 		}
 
-		buffer = raw;
+		if (walk.isRetainBody())
+			buffer = raw;
 		flags |= PARSED;
 	}
 	
@@ -384,8 +386,7 @@ public class RevCommit extends RevObject {
 		inDegree = 0;
 	}
 
-	public void dispose() {
-		flags &= ~PARSED;
+	final void disposeBody() {
 		buffer = null;
 	}
 
