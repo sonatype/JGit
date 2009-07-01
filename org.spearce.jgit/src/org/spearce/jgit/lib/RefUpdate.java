@@ -125,14 +125,20 @@ public class RefUpdate {
 		 * This kind of error doesn't include {@link #LOCK_FAILURE}, which is a
 		 * different case.
 		 */
-		IO_FAILURE
+		IO_FAILURE,
+
+		/**
+		 * The ref was renamed from another name
+		 * <p>
+		 */
+		RENAMED
 	}
 
 	/** Repository the ref is stored in. */
-	private final RefDatabase db;
+	final RefDatabase db;
 
 	/** Location of the loose file holding the value of this ref. */
-	private final File looseFile;
+	final File looseFile;
 
 	/** New value the caller wants this ref to have. */
 	private ObjectId newValue;
@@ -156,7 +162,7 @@ public class RefUpdate {
 	private ObjectId expValue;
 
 	/** Result of the update operation. */
-	private Result result = Result.NOT_ATTEMPTED;
+	Result result = Result.NOT_ATTEMPTED;
 
 	private final Ref ref;
 
@@ -165,6 +171,7 @@ public class RefUpdate {
 		this.ref = ref;
 		oldValue = ref.getObjectId();
 		looseFile = f;
+		refLogMessage = "";
 	}
 
 	/** @return the repository the updated ref resides in */
@@ -264,7 +271,8 @@ public class RefUpdate {
 	/**
 	 * Get the message to include in the reflog.
 	 * 
-	 * @return message the caller wants to include in the reflog.
+	 * @return message the caller wants to include in the reflog; null if the
+	 *         update should not be logged.
 	 */
 	public String getRefLogMessage() {
 		return refLogMessage;
@@ -274,15 +282,29 @@ public class RefUpdate {
 	 * Set the message to include in the reflog.
 	 * 
 	 * @param msg
-	 *            the message to describe this change.
+	 *            the message to describe this change. It may be null
+	 *            if appendStatus is null in order not to append to the reflog
 	 * @param appendStatus
 	 *            true if the status of the ref change (fast-forward or
 	 *            forced-update) should be appended to the user supplied
 	 *            message.
 	 */
 	public void setRefLogMessage(final String msg, final boolean appendStatus) {
-		refLogMessage = msg;
-		refLogIncludeResult = appendStatus;
+		if (msg == null && !appendStatus)
+			disableRefLog();
+		else if (msg == null && appendStatus) {
+			refLogMessage = "";
+			refLogIncludeResult = true;
+		} else {
+			refLogMessage = msg;
+			refLogIncludeResult = appendStatus;
+		}
+	}
+
+	/** Don't record this update in the ref's associated reflog. */
+	public void disableRefLog() {
+		refLogMessage = null;
+		refLogIncludeResult = false;
 	}
 
 	/**
@@ -418,6 +440,15 @@ public class RefUpdate {
 		RevObject newObj;
 		RevObject oldObj;
 
+		int lastSlash = getName().lastIndexOf('/');
+		if (lastSlash > 0)
+			if (db.getRepository().getRef(getName().substring(0, lastSlash)) != null)
+				return Result.LOCK_FAILURE;
+		String rName = getName() + "/";
+		for (Ref r : db.getAllRefs().values()) {
+			if (r.getName().startsWith(rName))
+				return Result.LOCK_FAILURE;
+		}
 		lock = new LockFile(looseFile);
 		if (!lock.lock())
 			return Result.LOCK_FAILURE;
@@ -471,19 +502,35 @@ public class RefUpdate {
 		lock.setNeedStatInformation(true);
 		lock.write(newValue);
 		String msg = getRefLogMessage();
-		if (msg != null && refLogIncludeResult) {
-			if (status == Result.FORCED)
-				msg += ": forced-update";
-			else if (status == Result.FAST_FORWARD)
-				msg += ": fast forward";
-			else if (status == Result.NEW)
-				msg += ": created";
+		if (msg != null) {
+			if (refLogIncludeResult) {
+				String strResult = toResultString(status);
+				if (strResult != null) {
+					if (msg.length() > 0)
+						msg = msg + ": " + strResult;
+					else
+						msg = strResult;
+				}
+			}
+			RefLogWriter.append(this, msg);
 		}
-		RefLogWriter.append(this, msg);
 		if (!lock.commit())
 			return Result.LOCK_FAILURE;
 		db.stored(this.ref.getOrigName(),  ref.getName(), newValue, lock.getCommitLastModified());
 		return status;
+	}
+
+	private static String toResultString(final Result status) {
+		switch (status) {
+		case FORCED:
+			return "forced-update";
+		case FAST_FORWARD:
+			return "fast forward";
+		case NEW:
+			return "created";
+		default:
+			return null;
+		}
 	}
 
 	/**
@@ -495,7 +542,7 @@ public class RefUpdate {
 				throws IOException;
 	}
 
-	private class UpdateStore extends Store {
+	class UpdateStore extends Store {
 
 		@Override
 		Result store(final LockFile lock, final Result status)
@@ -504,7 +551,7 @@ public class RefUpdate {
 		}
 	}
 
-	private class DeleteStore extends Store {
+	class DeleteStore extends Store {
 
 		@Override
 		Result store(LockFile lock, Result status) throws IOException {
@@ -525,28 +572,42 @@ public class RefUpdate {
 			lock.unlock();
 			if (storage.isLoose())
 				deleteFileAndEmptyDir(looseFile, levels);
+			db.uncacheRef(ref.getName());
 			return status;
 		}
 
 		private void deleteFileAndEmptyDir(final File file, final int depth)
 				throws IOException {
-			if (file.exists()) {
+			if (file.isFile()) {
 				if (!file.delete())
 					throw new IOException("File cannot be deleted: " + file);
-				deleteEmptyDir(file.getParentFile(), depth);
-			}
-		}
-
-		private void deleteEmptyDir(File dir, int depth) {
-			for (; depth > 0 && dir != null; depth--) {
-				if (!dir.delete())
-					break;
-				dir = dir.getParentFile();
+				File dir = file.getParentFile();
+				for  (int i = 0; i < depth; ++i) {
+					if (!dir.delete())
+						break; // ignore problem here
+					dir = dir.getParentFile();
+				}
 			}
 		}
 	}
 
-	private static int count(final String s, final char c) {
+	UpdateStore newUpdateStore() {
+		return new UpdateStore();
+	}
+
+	DeleteStore newDeleteStore() {
+		return new DeleteStore();
+	}
+
+	static void deleteEmptyDir(File dir, int depth) {
+		for (; depth > 0 && dir != null; depth--) {
+			if (dir.exists() && !dir.delete())
+				break;
+			dir = dir.getParentFile();
+		}
+	}
+
+	static int count(final String s, final char c) {
 		int count = 0;
 		for (int p = s.indexOf(c); p >= 0; p = s.indexOf(c, p + 1)) {
 			count++;

@@ -468,6 +468,22 @@ public class Repository {
 	}
 
 	/**
+	 * Create a command to rename a ref in this repository
+	 *
+	 * @param fromRef
+	 *            name of ref to rename from
+	 * @param toRef
+	 *            name of ref to rename to
+	 * @return an update command that knows how to rename a branch to another.
+	 * @throws IOException
+	 *             the rename could not be performed.
+	 *
+	 */
+	public RefRename renameRef(final String fromRef, final String toRef) throws IOException {
+		return refs.newRename(fromRef, toRef);
+	}
+
+	/**
 	 * Parse a git revision string and return an object id.
 	 *
 	 * Currently supported is combinations of these.
@@ -1088,5 +1104,18 @@ public class Repository {
 		if (refName.startsWith(Constants.R_REMOTES))
 			return refName.substring(Constants.R_REMOTES.length());
 		return refName;
+	}
+
+	/**
+	 * @param refName
+	 * @return a {@link ReflogReader} for the supplied refname, or null if the
+	 *         named ref does not exist.
+	 * @throws IOException the ref could not be accessed.
+	 */
+	public ReflogReader getReflogReader(String refName) throws IOException {
+		Ref ref = getRef(refName);
+		if (ref != null)
+			return new ReflogReader(this, ref.getOrigName());
+		return null;
 	}
 }

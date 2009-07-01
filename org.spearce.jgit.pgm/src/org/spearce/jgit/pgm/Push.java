@@ -55,6 +55,9 @@ import org.spearce.jgit.transport.RemoteRefUpdate.Status;
 
 @Command(common = true, usage = "Update remote repository from local refs")
 class Push extends TextBuiltin {
+	@Option(name = "--timeout", metaVar = "SECONDS", usage = "abort connection if no activity")
+	int timeout = -1;
+
 	@Argument(index = 0, metaVar = "uri-ish")
 	private String remote = "origin";
 
@@ -102,8 +105,11 @@ class Push extends TextBuiltin {
 				refSpecs.add(spec.setForceUpdate(true));
 		}
 
-		final List<Transport> transports = Transport.openAll(db, remote);
+		final List<Transport> transports;
+		transports = Transport.openAll(db, remote, Transport.Operation.PUSH);
 		for (final Transport transport : transports) {
+			if (0 <= timeout)
+				transport.setTimeout(timeout);
 			transport.setPushThin(thin);
 			if (receivePack != null)
 				transport.setOptionReceivePack(receivePack);

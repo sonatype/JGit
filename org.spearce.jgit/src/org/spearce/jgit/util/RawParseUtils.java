@@ -58,6 +58,8 @@ public final class RawParseUtils {
 
 	private static final byte[] digits16;
 
+	private static final byte[] footerLineKeyChars;
+
 	static {
 		digits10 = new byte['9' + 1];
 		Arrays.fill(digits10, (byte) -1);
@@ -72,6 +74,15 @@ public final class RawParseUtils {
 			digits16[i] = (byte) ((i - 'a') + 10);
 		for (char i = 'A'; i <= 'F'; i++)
 			digits16[i] = (byte) ((i - 'A') + 10);
+
+		footerLineKeyChars = new byte['z' + 1];
+		footerLineKeyChars['-'] = 1;
+		for (char i = '0'; i <= '9'; i++)
+			footerLineKeyChars[i] = 1;
+		for (char i = 'A'; i <= 'Z'; i++)
+			footerLineKeyChars[i] = 1;
+		for (char i = 'a'; i <= 'z'; i++)
+			footerLineKeyChars[i] = 1;
 	}
 
 	/**
@@ -419,6 +430,67 @@ public final class RawParseUtils {
 	}
 
 	/**
+	 * Locate the first position before a given character.
+	 *
+	 * @param b
+	 *            buffer to scan.
+	 * @param ptr
+	 *            position within buffer to start looking for chrA at.
+	 * @param chrA
+	 *            character to find.
+	 * @return new position just before chrA, -1 for not found
+	 */
+	public static final int prev(final byte[] b, int ptr, final char chrA) {
+		if (ptr == b.length)
+			--ptr;
+		while (ptr >= 0) {
+			if (b[ptr--] == chrA)
+				return ptr;
+		}
+		return ptr;
+	}
+
+	/**
+	 * Locate the first position before the previous LF.
+	 * <p>
+	 * This method stops on the first '\n' it finds.
+	 *
+	 * @param b
+	 *            buffer to scan.
+	 * @param ptr
+	 *            position within buffer to start looking for LF at.
+	 * @return new position just before the first LF found, -1 for not found
+	 */
+	public static final int prevLF(final byte[] b, int ptr) {
+		return prev(b, ptr, '\n');
+	}
+
+	/**
+	 * Locate the previous position before either the given character or LF.
+	 * <p>
+	 * This method stops on the first match it finds from either chrA or '\n'.
+	 *
+	 * @param b
+	 *            buffer to scan.
+	 * @param ptr
+	 *            position within buffer to start looking for chrA or LF at.
+	 * @param chrA
+	 *            character to find.
+	 * @return new position just before the first chrA or LF to be found, -1 for
+	 *         not found
+	 */
+	public static final int prevLF(final byte[] b, int ptr, final char chrA) {
+		if (ptr == b.length)
+			--ptr;
+		while (ptr >= 0) {
+			final byte c = b[ptr--];
+			if (c == chrA || c == '\n')
+				return ptr;
+		}
+		return ptr;
+	}
+
+	/**
 	 * Index the region between <code>[ptr, end)</code> to find line starts.
 	 * <p>
 	 * The returned list is 1 indexed. Index 0 contains
@@ -606,6 +678,85 @@ public final class RawParseUtils {
 	}
 
 	/**
+	 * Parse a name data (e.g. as within a reflog) into a PersonIdent.
+	 * <p>
+	 * When passing in a value for <code>nameB</code> callers should use the
+	 * return value of {@link #author(byte[], int)} or
+	 * {@link #committer(byte[], int)}, as these methods provide the proper
+	 * position within the buffer.
+	 *
+	 * @param raw
+	 *            the buffer to parse character data from.
+	 * @param nameB
+	 *            first position of the identity information. This should be the
+	 *            first position after the space which delimits the header field
+	 *            name (e.g. "author" or "committer") from the rest of the
+	 *            identity line.
+	 * @return the parsed identity. Never null.
+	 */
+	public static PersonIdent parsePersonIdentOnly(final byte[] raw, final int nameB) {
+		int stop = nextLF(raw, nameB);
+		int emailB = nextLF(raw, nameB, '<');
+		int emailE = nextLF(raw, emailB, '>');
+		final String name;
+		final String email;
+		if (emailE < stop) {
+			email = decode(raw, emailB, emailE - 1);
+		} else {
+			email = "invalid";
+		}
+		if (emailB < stop)
+			name = decode(raw, nameB, emailB - 2);
+		else
+			name = decode(raw, nameB, stop);
+
+		final MutableInteger ptrout = new MutableInteger();
+		long when;
+		int tz;
+		if (emailE < stop) {
+			when = parseLongBase10(raw, emailE + 1, ptrout);
+			tz = parseTimeZoneOffset(raw, ptrout.value);
+		} else {
+			when = 0;
+			tz = 0;
+		}
+		return new PersonIdent(name, email, when * 1000L, tz);
+	}
+
+	/**
+	 * Locate the end of a footer line key string.
+	 * <p>
+	 * If the region at {@code raw[ptr]} matches {@code ^[A-Za-z0-9-]+:} (e.g.
+	 * "Signed-off-by: A. U. Thor\n") then this method returns the position of
+	 * the first ':'.
+	 * <p>
+	 * If the region at {@code raw[ptr]} does not match {@code ^[A-Za-z0-9-]+:}
+	 * then this method returns -1.
+	 *
+	 * @param raw
+	 *            buffer to scan.
+	 * @param ptr
+	 *            first position within raw to consider as a footer line key.
+	 * @return position of the ':' which terminates the footer line key if this
+	 *         is otherwise a valid footer line key; otherwise -1.
+	 */
+	public static int endOfFooterLineKey(final byte[] raw, int ptr) {
+		try {
+			for (;;) {
+				final byte c = raw[ptr];
+				if (footerLineKeyChars[c] == 0) {
+					if (c == ':')
+						return ptr;
+					return -1;
+				}
+				ptr++;
+			}
+		} catch (ArrayIndexOutOfBoundsException e) {
+			return -1;
+		}
+	}
+
+	/**
 	 * Decode a buffer under UTF-8, if possible.
 	 *
 	 * If the byte stream cannot be decoded that way, the platform default is tried
@@ -617,7 +768,28 @@ public final class RawParseUtils {
 	 *         after decoding the region through the specified character set.
 	 */
 	public static String decode(final byte[] buffer) {
-		return decode(Constants.CHARSET, buffer, 0, buffer.length);
+		return decode(buffer, 0, buffer.length);
+	}
+
+	/**
+	 * Decode a buffer under UTF-8, if possible.
+	 *
+	 * If the byte stream cannot be decoded that way, the platform default is
+	 * tried and if that too fails, the fail-safe ISO-8859-1 encoding is tried.
+	 *
+	 * @param buffer
+	 *            buffer to pull raw bytes from.
+	 * @param start
+	 *            start position in buffer
+	 * @param end
+	 *            one position past the last location within the buffer to take
+	 *            data from.
+	 * @return a string representation of the range <code>[start,end)</code>,
+	 *         after decoding the region through the specified character set.
+	 */
+	public static String decode(final byte[] buffer, final int start,
+			final int end) {
+		return decode(Constants.CHARSET, buffer, start, end);
 	}
 
 	/**

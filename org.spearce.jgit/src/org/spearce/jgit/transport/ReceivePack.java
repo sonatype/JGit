@@ -69,6 +69,9 @@ import org.spearce.jgit.revwalk.RevCommit;
 import org.spearce.jgit.revwalk.RevObject;
 import org.spearce.jgit.revwalk.RevWalk;
 import org.spearce.jgit.transport.ReceiveCommand.Result;
+import org.spearce.jgit.util.io.InterruptTimer;
+import org.spearce.jgit.util.io.TimeoutInputStream;
+import org.spearce.jgit.util.io.TimeoutOutputStream;
 
 /**
  * Implements the server side of a push connection, receiving objects.
@@ -108,6 +111,14 @@ public class ReceivePack {
 
 	/** Hook to report on the commands after execution. */
 	private PostReceiveHook postReceive;
+
+	/** Timeout in seconds to wait for client interaction. */
+	private int timeout;
+
+	/** Timer to manage {@link #timeout}. */
+	private InterruptTimer timer;
+
+	private TimeoutInputStream timeoutIn;
 
 	private InputStream rawIn;
 
@@ -297,6 +308,23 @@ public class ReceivePack {
 		postReceive = h != null ? h : PostReceiveHook.NULL;
 	}
 
+	/** @return timeout (in seconds) before aborting an IO operation. */
+	public int getTimeout() {
+		return timeout;
+	}
+
+	/**
+	 * Set the timeout before willing to abort an IO call.
+	 *
+	 * @param seconds
+	 *            number of seconds to wait (with no data transfer occurring)
+	 *            before aborting an IO read or write operation with the
+	 *            connected client.
+	 */
+	public void setTimeout(final int seconds) {
+		timeout = seconds;
+	}
+
 	/** @return all of the command received by the current request. */
 	public List<ReceiveCommand> getAllCommands() {
 		return Collections.unmodifiableList(commands);
@@ -365,6 +393,17 @@ public class ReceivePack {
 			rawIn = input;
 			rawOut = output;
 
+			if (timeout > 0) {
+				final Thread caller = Thread.currentThread();
+				timer = new InterruptTimer(caller.getName() + "-Timer");
+				timeoutIn = new TimeoutInputStream(rawIn, timer);
+				TimeoutOutputStream o = new TimeoutOutputStream(rawOut, timer);
+				timeoutIn.setTimeout(timeout * 1000);
+				o.setTimeout(timeout * 1000);
+				rawIn = timeoutIn;
+				rawOut = o;
+			}
+
 			pckIn = new PacketLineIn(rawIn);
 			pckOut = new PacketLineOut(rawOut);
 			if (messages != null) {
@@ -389,6 +428,7 @@ public class ReceivePack {
 				}
 			} finally {
 				unlockPack();
+				timeoutIn = null;
 				rawIn = null;
 				rawOut = null;
 				pckIn = null;
@@ -397,6 +437,13 @@ public class ReceivePack {
 				refs = null;
 				enabledCapablities = null;
 				commands = null;
+				if (timer != null) {
+					try {
+						timer.terminate();
+					} finally {
+						timer = null;
+					}
+				}
 			}
 		}
 	}
@@ -461,32 +508,37 @@ public class ReceivePack {
 		final StringBuilder m = new StringBuilder(100);
 		final char[] idtmp = new char[2 * Constants.OBJECT_ID_LENGTH];
 		final Iterator<Ref> i = RefComparator.sort(refs.values()).iterator();
-		{
-			if (i.hasNext()) {
-				final Ref r = i.next();
-				format(m, idtmp, r.getObjectId(), r.getOrigName());
-			} else {
-				format(m, idtmp, ObjectId.zeroId(), "capabilities^{}");
-			}
-			m.append('\0');
-			m.append(' ');
-			m.append(CAPABILITY_DELETE_REFS);
-			m.append(' ');
-			m.append(CAPABILITY_REPORT_STATUS);
-			if (allowOfsDelta) {
-				m.append(' ');
-				m.append(CAPABILITY_OFS_DELTA);
-			}
-			m.append(' ');
-			writeAdvertisedRef(m);
-		}
-
+		boolean first = true;
 		while (i.hasNext()) {
 			final Ref r = i.next();
+			if (r.getObjectId() == null)
+				continue;
 			format(m, idtmp, r.getObjectId(), r.getOrigName());
+			if (first) {
+				first = false;
+				advertiseCapabilities(m);
+			}
+			writeAdvertisedRef(m);
+		}
+		if (first) {
+			format(m, idtmp, ObjectId.zeroId(), "capabilities^{}");
+			advertiseCapabilities(m);
 			writeAdvertisedRef(m);
 		}
 		pckOut.end();
+	}
+
+	private void advertiseCapabilities(final StringBuilder m) {
+		m.append('\0');
+		m.append(' ');
+		m.append(CAPABILITY_DELETE_REFS);
+		m.append(' ');
+		m.append(CAPABILITY_REPORT_STATUS);
+		if (allowOfsDelta) {
+			m.append(' ');
+			m.append(CAPABILITY_OFS_DELTA);
+		}
+		m.append(' ');
 	}
 
 	private void format(final StringBuilder m, final char[] idtmp,
@@ -552,6 +604,13 @@ public class ReceivePack {
 	}
 
 	private void receivePack() throws IOException {
+		// It might take the client a while to pack the objects it needs
+		// to send to us.  We should increase our timeout so we don't
+		// abort while the client is computing.
+		//
+		if (timeoutIn != null)
+			timeoutIn.setTimeout(10 * timeout * 1000);
+
 		final IndexPack ip = IndexPack.create(db, rawIn);
 		ip.setFixThin(true);
 		ip.setObjectChecking(isCheckReceivedObjects());
@@ -561,6 +620,9 @@ public class ReceivePack {
 		if (getRefLogIdent() != null)
 			lockMsg += " from " + getRefLogIdent().toExternalString();
 		packLock = ip.renameAndOpenPack(lockMsg);
+
+		if (timeoutIn != null)
+			timeoutIn.setTimeout(timeout * 1000);
 	}
 
 	private void checkConnectivity() throws IOException {

@@ -71,9 +71,9 @@ public abstract class CommitTimeRevFilter extends RevFilter {
 	}
 
 	/**
-	 * Create a new filter to select commits after or equal a given date/time <code>since</code> 
+	 * Create a new filter to select commits after or equal a given date/time <code>since</code>
 	 * and before or equal a given date/time <code>until</code>.
-	 * 
+	 *
 	 * @param since the point in time to cut on.
 	 * @param until the point in time to cut off.
 	 * @return a new filter to select commits between the given date/times.
@@ -140,7 +140,7 @@ public abstract class CommitTimeRevFilter extends RevFilter {
 
 		Between(final long since, final long until) {
 			super(since);
-			this.until = (int) (until / 1000); 
+			this.until = (int) (until / 1000);
 		}
 
 		@Override

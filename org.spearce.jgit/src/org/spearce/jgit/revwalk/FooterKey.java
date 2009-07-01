@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008, Google Inc.
+ * Copyright (C) 2009, Google Inc.
  *
  * All rights reserved.
  *
@@ -35,39 +35,43 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.pgm;
+package org.spearce.jgit.revwalk;
 
-import java.io.File;
+import org.spearce.jgit.lib.Constants;
 
-import org.kohsuke.args4j.Argument;
-import org.kohsuke.args4j.Option;
-import org.spearce.jgit.lib.Repository;
+/** Case insensitive key for a {@link FooterLine}. */
+public final class FooterKey {
+	/** Standard {@code Signed-off-by} */
+	public static final FooterKey SIGNED_OFF_BY = new FooterKey("Signed-off-by");
 
-@Command(common = false, usage = "Server side backend for 'jgit fetch'")
-class UploadPack extends TextBuiltin {
-	@Option(name = "--timeout", metaVar = "SECONDS", usage = "abort connection if no activity")
-	int timeout = -1;
+	/** Standard {@code Acked-by} */
+	public static final FooterKey ACKED_BY = new FooterKey("Acked-by");
 
-	@Argument(index = 0, required = true, metaVar = "DIRECTORY", usage = "Repository to read from")
-	File srcGitdir;
+	/** Standard {@code CC} */
+	public static final FooterKey CC = new FooterKey("CC");
 
-	@Override
-	protected final boolean requiresRepository() {
-		return false;
+	private final String name;
+
+	final byte[] raw;
+
+	/**
+	 * Create a key for a specific footer line.
+	 *
+	 * @param keyName
+	 *            name of the footer line.
+	 */
+	public FooterKey(final String keyName) {
+		name = keyName;
+		raw = Constants.encode(keyName.toLowerCase());
+	}
+
+	/** @return name of this footer line. */
+	public String getName() {
+		return name;
 	}
 
 	@Override
-	protected void run() throws Exception {
-		final org.spearce.jgit.transport.UploadPack rp;
-
-		if (new File(srcGitdir, ".git").isDirectory())
-			srcGitdir = new File(srcGitdir, ".git");
-		db = new Repository(srcGitdir);
-		if (!db.getObjectsDirectory().isDirectory())
-			throw die("'" + srcGitdir.getPath() + "' not a git repository");
-		rp = new org.spearce.jgit.transport.UploadPack(db);
-		if (0 <= timeout)
-			rp.setTimeout(timeout);
-		rp.upload(System.in, System.out, System.err);
+	public String toString() {
+		return "FooterKey[" + name + "]";
 	}
 }

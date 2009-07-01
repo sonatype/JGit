@@ -58,6 +58,8 @@ public class RemoteConfig {
 
 	private static final String KEY_URL = "url";
 
+	private static final String KEY_PUSHURL = "pushurl";
+
 	private static final String KEY_FETCH = "fetch";
 
 	private static final String KEY_PUSH = "push";
@@ -69,6 +71,8 @@ public class RemoteConfig {
 	private static final String KEY_TAGOPT = "tagopt";
 
 	private static final String KEY_MIRROR = "mirror";
+
+	private static final String KEY_TIMEOUT = "timeout";
 
 	private static final boolean DEFAULT_MIRROR = false;
 
@@ -108,6 +112,8 @@ public class RemoteConfig {
 
 	private List<URIish> uris;
 
+	private List<URIish> pushURIs;
+
 	private List<RefSpec> fetch;
 
 	private List<RefSpec> push;
@@ -119,6 +125,8 @@ public class RemoteConfig {
 	private TagOpt tagopt;
 
 	private boolean mirror;
+
+	private int timeout;
 
 	/**
 	 * Parse a remote block from an existing configuration file.
@@ -147,6 +155,11 @@ public class RemoteConfig {
 		for (final String s : vlst)
 			uris.add(new URIish(s));
 
+		vlst = rc.getStringList(SECTION, name, KEY_PUSHURL);
+		pushURIs = new ArrayList<URIish>(vlst.length);
+		for (final String s : vlst)
+			pushURIs.add(new URIish(s));
+
 		vlst = rc.getStringList(SECTION, name, KEY_FETCH);
 		fetch = new ArrayList<RefSpec>(vlst.length);
 		for (final String s : vlst)
@@ -170,6 +183,7 @@ public class RemoteConfig {
 		val = rc.getString(SECTION, name, KEY_TAGOPT);
 		tagopt = TagOpt.fromOption(val);
 		mirror = rc.getBoolean(SECTION, name, KEY_MIRROR, DEFAULT_MIRROR);
+		timeout = rc.getInt(SECTION, name, KEY_TIMEOUT, 0);
 	}
 
 	/**
@@ -187,6 +201,11 @@ public class RemoteConfig {
 		rc.setStringList(SECTION, getName(), KEY_URL, vlst);
 
 		vlst.clear();
+		for (final URIish u : getPushURIs())
+			vlst.add(u.toPrivateString());
+		rc.setStringList(SECTION, getName(), KEY_PUSHURL, vlst);
+
+		vlst.clear();
 		for (final RefSpec u : getFetchRefSpecs())
 			vlst.add(u.toString());
 		rc.setStringList(SECTION, getName(), KEY_FETCH, vlst);
@@ -200,6 +219,7 @@ public class RemoteConfig {
 		set(rc, KEY_RECEIVEPACK, getReceivePack(), DEFAULT_RECEIVE_PACK);
 		set(rc, KEY_TAGOPT, getTagOpt().option(), TagOpt.AUTO_FOLLOW.option());
 		set(rc, KEY_MIRROR, mirror, DEFAULT_MIRROR);
+		set(rc, KEY_TIMEOUT, timeout, 0);
 	}
 
 	private void set(final RepositoryConfig rc, final String key,
@@ -216,6 +236,14 @@ public class RemoteConfig {
 			unset(rc, key);
 		else
 			rc.setBoolean(SECTION, getName(), key, currentValue);
+	}
+
+	private void set(final RepositoryConfig rc, final String key,
+			final int currentValue, final int defaultValue) {
+		if (defaultValue == currentValue)
+			unset(rc, key);
+		else
+			rc.setInt(SECTION, getName(), key, currentValue);
 	}
 
 	private void unset(final RepositoryConfig rc, final String key) {
@@ -262,6 +290,39 @@ public class RemoteConfig {
 	 */
 	public boolean removeURI(final URIish toRemove) {
 		return uris.remove(toRemove);
+	}
+
+	/**
+	 * Get all configured push-only URIs under this remote.
+	 *
+	 * @return the set of URIs known to this remote.
+	 */
+	public List<URIish> getPushURIs() {
+		return Collections.unmodifiableList(pushURIs);
+	}
+
+	/**
+	 * Add a new push-only URI to the end of the list of URIs.
+	 *
+	 * @param toAdd
+	 *            the new URI to add to this remote.
+	 * @return true if the URI was added; false if it already exists.
+	 */
+	public boolean addPushURI(final URIish toAdd) {
+		if (pushURIs.contains(toAdd))
+			return false;
+		return pushURIs.add(toAdd);
+	}
+
+	/**
+	 * Remove a push-only URI from the list of URIs.
+	 *
+	 * @param toRemove
+	 *            the URI to remove from this remote.
+	 * @return true if the URI was added; false if it already exists.
+	 */
+	public boolean removePushURI(final URIish toRemove) {
+		return pushURIs.remove(toRemove);
 	}
 
 	/**
@@ -419,5 +480,22 @@ public class RemoteConfig {
 	 */
 	public void setMirror(final boolean m) {
 		mirror = m;
+	}
+
+	/** @return timeout (in seconds) before aborting an IO operation. */
+	public int getTimeout() {
+		return timeout;
+	}
+
+	/**
+	 * Set the timeout before willing to abort an IO call.
+	 *
+	 * @param seconds
+	 *            number of seconds to wait (with no data transfer occurring)
+	 *            before aborting an IO read or write operation with this
+	 *            remote.  A timeout of 0 will block indefinitely.
+	 */
+	public void setTimeout(final int seconds) {
+		timeout = seconds;
 	}
 }

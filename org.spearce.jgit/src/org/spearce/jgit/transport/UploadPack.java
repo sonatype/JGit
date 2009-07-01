@@ -64,6 +64,9 @@ import org.spearce.jgit.revwalk.RevFlagSet;
 import org.spearce.jgit.revwalk.RevObject;
 import org.spearce.jgit.revwalk.RevTag;
 import org.spearce.jgit.revwalk.RevWalk;
+import org.spearce.jgit.util.io.InterruptTimer;
+import org.spearce.jgit.util.io.TimeoutInputStream;
+import org.spearce.jgit.util.io.TimeoutOutputStream;
 
 /**
  * Implements the server side of a fetch connection, transmitting objects.
@@ -88,6 +91,12 @@ public class UploadPack {
 
 	/** Revision traversal support over {@link #db}. */
 	private final RevWalk walk;
+
+	/** Timeout in seconds to wait for client interaction. */
+	private int timeout;
+
+	/** Timer to manage {@link #timeout}. */
+	private InterruptTimer timer;
 
 	private InputStream rawIn;
 
@@ -164,6 +173,23 @@ public class UploadPack {
 		return walk;
 	}
 
+	/** @return timeout (in seconds) before aborting an IO operation. */
+	public int getTimeout() {
+		return timeout;
+	}
+
+	/**
+	 * Set the timeout before willing to abort an IO call.
+	 *
+	 * @param seconds
+	 *            number of seconds to wait (with no data transfer occurring)
+	 *            before aborting an IO read or write operation with the
+	 *            connected client.
+	 */
+	public void setTimeout(final int seconds) {
+		timeout = seconds;
+	}
+
 	/**
 	 * Execute the upload task on the socket.
 	 *
@@ -183,12 +209,33 @@ public class UploadPack {
 	 */
 	public void upload(final InputStream input, final OutputStream output,
 			final OutputStream messages) throws IOException {
-		rawIn = input;
-		rawOut = output;
+		try {
+			rawIn = input;
+			rawOut = output;
 
-		pckIn = new PacketLineIn(rawIn);
-		pckOut = new PacketLineOut(rawOut);
-		service();
+			if (timeout > 0) {
+				final Thread caller = Thread.currentThread();
+				timer = new InterruptTimer(caller.getName() + "-Timer");
+				TimeoutInputStream i = new TimeoutInputStream(rawIn, timer);
+				TimeoutOutputStream o = new TimeoutOutputStream(rawOut, timer);
+				i.setTimeout(timeout * 1000);
+				o.setTimeout(timeout * 1000);
+				rawIn = i;
+				rawOut = o;
+			}
+
+			pckIn = new PacketLineIn(rawIn);
+			pckOut = new PacketLineOut(rawOut);
+			service();
+		} finally {
+			if (timer != null) {
+				try {
+					timer.terminate();
+				} finally {
+					timer = null;
+				}
+			}
+		}
 	}
 
 	private void service() throws IOException {
@@ -235,6 +282,8 @@ public class UploadPack {
 		}
 		while (i.hasNext()) {
 			final Ref r = i.next();
+			if (r.getObjectId() == null)
+				continue;
 			final RevObject o = safeParseAny(r.getObjectId());
 			if (o != null) {
 				advertise(m, idtmp, o, r.getOrigName());
@@ -302,13 +351,13 @@ public class UploadPack {
 			if (!line.startsWith("want ") || line.length() < 45)
 				throw new PackProtocolException("expected want; got " + line);
 
-			if (isFirst) {
-				final int sp = line.indexOf(' ', 45);
-				if (sp >= 0) {
-					for (String c : line.substring(sp + 1).split(" "))
-						options.add(c);
-					line = line.substring(0, sp);
-				}
+			if (isFirst && line.length() > 45) {
+				String opt = line.substring(45);
+				if (opt.startsWith(" "))
+					opt = opt.substring(1);
+				for (String c : opt.split(" "))
+					options.add(c);
+				line = line.substring(0, 45);
 			}
 
 			final ObjectId id = ObjectId.fromString(line.substring(5));
