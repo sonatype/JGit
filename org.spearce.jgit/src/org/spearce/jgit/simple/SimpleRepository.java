@@ -960,6 +960,8 @@ public class SimpleRepository {
 
 			ce.setCommitHash(c.getId().name());
 			ce.setTreeHash(c.getTree().getId().name());
+
+			//X TODO missing: file list
 			
 			changes.add(ce);
 		}

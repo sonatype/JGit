@@ -38,10 +38,12 @@
 package org.spearce.jgit.simple;
 
 import java.util.Date;
+import java.util.List;
+import java.io.File;
 
 /**
  * This bean represents one line in JGit's git-whatchanged equivalent 
- * @see SimpleRepository#whatchanged(org.spearce.jgit.revwalk.RevSort[], String, String, String, String, int)
+ * @see SimpleRepository#whatchanged(org.spearce.jgit.revwalk.RevSort[], String, String, Date, Date, int)
  */
 public class ChangeEntry {
 	private String commitHash;
@@ -54,6 +56,7 @@ public class ChangeEntry {
 	private Date   committerDate;
 	private String subject;
 	private String body;
+	private List<File> files;
 	
 	/**
 	 * @return hash of the commit
@@ -193,5 +196,19 @@ public class ChangeEntry {
 	 */
 	public void setBody(String body) {
 		this.body = body;
+	}
+
+	/**
+	 * @param files which have been changed in this commit
+	 */
+	public void setFiles(List<File> files) {
+		this.files = files;
+	}
+
+	/**
+	 * @return files which have been changed in this commit
+	 */
+	public List<File> getFiles() {
+		return files;
 	}
 }
