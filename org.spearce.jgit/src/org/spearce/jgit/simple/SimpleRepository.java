@@ -60,6 +60,7 @@ import org.spearce.jgit.dircache.DirCacheEntry;
 import org.spearce.jgit.dircache.DirCacheIterator;
 import org.spearce.jgit.errors.CommitException;
 import org.spearce.jgit.errors.CorruptObjectException;
+import org.spearce.jgit.errors.EntryExistsException;
 import org.spearce.jgit.errors.IncorrectObjectTypeException;
 import org.spearce.jgit.errors.MissingObjectException;
 import org.spearce.jgit.errors.NotSupportedException;
@@ -72,6 +73,7 @@ import org.spearce.jgit.lib.FileMode;
 import org.spearce.jgit.lib.GitIndex;
 import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.ObjectLoader;
 import org.spearce.jgit.lib.ObjectWriter;
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.ProgressMonitor;
@@ -169,13 +171,14 @@ public class SimpleRepository {
 	 * @param workDir
 	 * @param remoteName 
 	 * @param uri 
-	 * @param branch 
+	 * @param branchName
+	 * @param tagName 
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
 	 * @return the freshly cloned {@link SimpleRepository}
 	 * @throws IOException 
 	 * @throws URISyntaxException 
 	 */
-	public static SimpleRepository clone(File workDir, String remoteName, URIish uri, String branch, ProgressMonitor monitor) 
+	public static SimpleRepository clone(File workDir, String remoteName, URIish uri, String branchName, String tagName, ProgressMonitor monitor) 
 	throws IOException, URISyntaxException {
 		SimpleRepository repo = new SimpleRepository();
 		repo.initRepository(workDir, ".git");
@@ -184,7 +187,7 @@ public class SimpleRepository {
 			monitor = NullProgressMonitor.INSTANCE;
 		}
 
-		repo.addRemote(remoteName, uri, branch, true, null);
+		repo.addRemote(remoteName, uri, branchName, tagName, true, null);
 		Ref head = repo.fetch(remoteName, monitor);
 		repo.checkout(head.getObjectId(), head.getName());
 		return repo;
@@ -206,7 +209,7 @@ public class SimpleRepository {
 	/**
 	 * A SimpleRepository may only be created with one of the factory methods.
 	 * @see #init(File)
-	 * @see #clone(File, String, URIish, String, ProgressMonitor)
+	 * @see #clone(File, String, URIish, String, String, ProgressMonitor)
 	 * @see #wrap(Repository)
 	 */
 	private SimpleRepository() {
@@ -260,6 +263,7 @@ public class SimpleRepository {
 	 * @param remoteName like 'origin'
 	 * @param uri to clone from 
 	 * @param branchName to clone initially, e.g. <code>master</code>
+	 * @param tagName to clone initially, e.g. <code>myproject-0.4.5</code>
 	 * @param allSelected
 	 *            true when all branches have to be fetched (indicates wildcard
 	 *            in created fetch refspec), false otherwise.
@@ -270,9 +274,11 @@ public class SimpleRepository {
 	 * @throws IOException 
 	 */
 	public void addRemote(final String remoteName, final URIish uri, final String branchName, 
+	                      final String tagName,
 			              final boolean allSelected, final Collection<Ref> selectedBranches) 
 	throws URISyntaxException, IOException {
-		Validate.notNull(branchName, "Branch name must not be null!");
+		Validate.isTrue(branchName != null || tagName != null, 
+		                "Either branch name or tag name must not be null! branchName={0} tagName={1}", branchName, tagName);
 		
 		// add remote configuration
 		final RemoteConfig rc = new RemoteConfig(db.getConfig(), remoteName);
@@ -297,9 +303,17 @@ public class SimpleRepository {
 		// setup the default remote branch for branchName
 		db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
 				branchName, "remote", remoteName);
-		db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
-				branchName, "merge", Constants.R_HEADS + branchName);
-
+	
+		if (branchName != null) {
+    		db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
+    				branchName, "merge", Constants.R_HEADS + branchName);
+		}
+		
+		if (tagName != null) {
+            db.getConfig().setString(RepositoryConfig.BRANCH_SECTION,
+                    branchName, "merge", Constants.R_TAGS + branchName);
+		}
+		
 		db.getConfig().save();
 	}
 
@@ -539,26 +553,39 @@ public class SimpleRepository {
 	/**
 	 * Checkout the given branch from the local repository.
 	 * This command makes no remote connections!
-	 * 
-	 * @param branchName or refspec, e.g. &quot;master&quot;
 	 * @param monitor for showing the progress. If <code>null</code> a {@code NullProgressMonitor} will be used
+	 * @param branchName or refspec, e.g. &quot;master&quot;
+	 * @param tagName name of the tag if we should checkout a tag
+	 * 
 	 * @throws IOException 
 	 */
-	public void checkout(String branchName, ProgressMonitor monitor) 
+	public void checkout(ProgressMonitor monitor, String branchName, String tagName) 
 	throws IOException {
-		Validate.notNull(branchName, "Branch name must not be null!");
+        Validate.isTrue(branchName != null || tagName != null, 
+                "Either branch name or tag name must not be null! branchName={0} tagName={1}", branchName, tagName);
 		
-		if (!Constants.HEAD.equals(branchName)) {
+		if (branchName != null && !Constants.HEAD.equals(branchName)) {
 			db.writeSymref(Constants.HEAD, branchName);
 		}
 		
-		ObjectId headId = db.resolve(branchName);
-
-		if (headId == null) {
-			throw new RevisionSyntaxException(branchName, "cannot find head of branch ");
+		ObjectId headId;
+		String refName = null;
+		
+		if (tagName != null) {
+            headId = db.resolve(tagName + "^0");
+            
+            //X TODO! The checkout of a tag should result in a detached HEAD!
+            refName = Constants.R_TAGS + tagName;
+		} else {
+			headId = db.resolve(branchName);
+			refName = branchName;
 		}
 		
-		checkout(headId, branchName);
+		if (headId == null) {
+			throw new RevisionSyntaxException(refName, "cannot find head of ref");
+		}
+		
+		checkout(headId, refName);
 	}
 
 
@@ -969,6 +996,52 @@ public class SimpleRepository {
 		return changes;
 	}
 	
+	/**
+	 * Create a tag 
+	 * @param tagName the name of the tag
+	 * @param tagMessage the message in the log
+	 * @param objectId <code>null</code> if the tag should be on the current HEAD, the objectId otherwise
+	 * @param force if <code>true</code> any existing tag will be overwritten!
+	 * @throws IOException 
+	 */
+	public void tag(String tagName, String tagMessage, String objectId, boolean force) 
+	throws IOException {
+		ObjectId object = null;
+		if (objectId == null) {
+			object = db.resolve(Constants.HEAD);
+		} else {
+			object = db.resolve(objectId);
+		}
+
+		if (object == null) {
+			throw new CorruptObjectException("Cannot resolve " + Constants.HEAD);
+
+		}
+		
+		if (!tagName.startsWith(Constants.R_TAGS))
+			tagName = Constants.R_TAGS + tagName;
+		if (!force && db.resolve(tagName) != null) {
+			throw new EntryExistsException("fatal: tag '"
+					+ tagName.substring(Constants.R_TAGS.length())
+					+ "' exists");
+		}
+
+		final ObjectLoader ldr = db.openObject(object);
+		if (ldr == null) {
+			throw new MissingObjectException(object, "any");
+		}
+		
+		org.spearce.jgit.lib.Tag tag = new org.spearce.jgit.lib.Tag(db);
+		tag.setObjId(object);
+		tag.setType(Constants.typeString(ldr.getType()));
+		tag.setTagger(new PersonIdent(db));
+		tag.setMessage(tagMessage.replaceAll("\r", ""));
+		tag.setTag(tagName.substring(Constants.R_TAGS.length()));
+		tag.tag();
+
+	}
+	
+	
 	//------------------------------------
 	// private helper functions
 	//------------------------------------
@@ -1062,19 +1135,19 @@ public class SimpleRepository {
 	/**
 	 * Checkout the headId into the working directory
 	 * @param headId
-	 * @param branch internal branch name, e.g. refs/heads/master
+	 * @param refName internal ref name, e.g. refs/heads/master
 	 * @throws IOException
 	 */
-	private void checkout(ObjectId headId, String branch) throws IOException {
-		if (!Constants.HEAD.equals(branch))
-			db.writeSymref(Constants.HEAD, branch);
+	private void checkout(ObjectId headId, String refName) throws IOException {
+		if (!Constants.HEAD.equals(refName))
+			db.writeSymref(Constants.HEAD, refName);
 
 		final Commit commit = db.mapCommit(headId);
 		final RefUpdate u = db.updateRef(Constants.HEAD);
 		u.setNewObjectId(commit.getCommitId());
 		Result result = u.forceUpdate();
 		
-		//X TODO REMOVE DEBUGGING OUTPUT!
+		//X TODO REMOVE DEBUGGING OUTPUT and CHECK RESULT!
 		System.out.println("updateRef " + u + " returned Result=" + result);
 
 		final GitIndex index = db.getIndex();
