@@ -43,7 +43,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import org.spearce.jgit.lib.RepositoryConfig;
+import org.spearce.jgit.lib.Config;
 
 /**
  * A remembered remote repository, including URLs and RefSpecs.
@@ -95,8 +95,8 @@ public class RemoteConfig {
 	 * @throws URISyntaxException
 	 *             one of the URIs within the remote's configuration is invalid.
 	 */
-	public static List<RemoteConfig> getAllRemoteConfigs(
-			final RepositoryConfig rc) throws URISyntaxException {
+	public static List<RemoteConfig> getAllRemoteConfigs(final Config rc)
+			throws URISyntaxException {
 		final List<String> names = new ArrayList<String>(rc
 				.getSubsections(SECTION));
 		Collections.sort(names);
@@ -143,7 +143,7 @@ public class RemoteConfig {
 	 * @throws URISyntaxException
 	 *             one of the URIs within the remote's configuration is invalid.
 	 */
-	public RemoteConfig(final RepositoryConfig rc, final String remoteName)
+	public RemoteConfig(final Config rc, final String remoteName)
 			throws URISyntaxException {
 		name = remoteName;
 
@@ -192,7 +192,7 @@ public class RemoteConfig {
 	 * @param rc
 	 *            the configuration file to store ourselves into.
 	 */
-	public void update(final RepositoryConfig rc) {
+	public void update(final Config rc) {
 		final List<String> vlst = new ArrayList<String>();
 
 		vlst.clear();
@@ -222,7 +222,7 @@ public class RemoteConfig {
 		set(rc, KEY_TIMEOUT, timeout, 0);
 	}
 
-	private void set(final RepositoryConfig rc, final String key,
+	private void set(final Config rc, final String key,
 			final String currentValue, final String defaultValue) {
 		if (defaultValue.equals(currentValue))
 			unset(rc, key);
@@ -230,7 +230,7 @@ public class RemoteConfig {
 			rc.setString(SECTION, getName(), key, currentValue);
 	}
 
-	private void set(final RepositoryConfig rc, final String key,
+	private void set(final Config rc, final String key,
 			final boolean currentValue, final boolean defaultValue) {
 		if (defaultValue == currentValue)
 			unset(rc, key);
@@ -238,16 +238,16 @@ public class RemoteConfig {
 			rc.setBoolean(SECTION, getName(), key, currentValue);
 	}
 
-	private void set(final RepositoryConfig rc, final String key,
-			final int currentValue, final int defaultValue) {
+	private void set(final Config rc, final String key, final int currentValue,
+			final int defaultValue) {
 		if (defaultValue == currentValue)
 			unset(rc, key);
 		else
 			rc.setInt(SECTION, getName(), key, currentValue);
 	}
 
-	private void unset(final RepositoryConfig rc, final String key) {
-		rc.unsetString(SECTION, getName(), key);
+	private void unset(final Config rc, final String key) {
+		rc.unset(SECTION, getName(), key);
 	}
 
 	/**

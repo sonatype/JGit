@@ -50,7 +50,7 @@ class FS_Win32 extends FS {
 					}
 				});
 		return osDotName != null
-				&& osDotName.toLowerCase().indexOf("windows") != -1;
+				&& StringUtils.toLowerCase(osDotName).indexOf("windows") != -1;
 	}
 
 	public boolean supportsExecute() {

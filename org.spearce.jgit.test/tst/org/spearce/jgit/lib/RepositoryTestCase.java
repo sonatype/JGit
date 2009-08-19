@@ -47,9 +47,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import junit.framework.TestCase;
 
@@ -87,35 +85,6 @@ public abstract class RepositoryTestCase extends TestCase {
 	}
 
 	protected boolean packedGitMMAP;
-
-	protected static class FakeSystemReader implements SystemReader {
-		Map<String, String> values = new HashMap<String, String>();
-		RepositoryConfig userGitConfig;
-		public String getenv(String variable) {
-			return values.get(variable);
-		}
-		public String getProperty(String key) {
-			return values.get(key);
-		}
-		public RepositoryConfig openUserConfig() {
-			return userGitConfig;
-		}
-		public void setUserGitConfig(RepositoryConfig userGitConfig) {
-			this.userGitConfig = userGitConfig;
-		}
-	}
-
-	/**
-	 * Simulates the reading of system variables and properties.
-	 * Unit test can control the returned values by manipulating
-	 * {@link FakeSystemReader#values}.
-	 */
-	protected static FakeSystemReader fakeSystemReader;
-
-	static {
-		fakeSystemReader = new FakeSystemReader();
-		RepositoryConfig.setSystemReader(fakeSystemReader);
-	}
 
 	/**
 	 * Configure JGit before setting up test repositories.
@@ -236,12 +205,6 @@ public abstract class RepositoryTestCase extends TestCase {
 
 	protected Repository db;
 
-	/**
-	 * mock user's global configuration used instead ~/.gitconfig.
-	 * This configuration can be modified by the tests without any
-	 * effect for ~/.gitconfig.
-	 */
-	protected RepositoryConfig userGitConfig;
 	private static Thread shutdownhook;
 	private static List<Runnable> shutDownCleanups = new ArrayList<Runnable>();
 	private static int testcount;
@@ -273,9 +236,10 @@ public abstract class RepositoryTestCase extends TestCase {
 			Runtime.getRuntime().addShutdownHook(shutdownhook);
 		}
 
-		final File userGitConfigFile = new File(trash_git, "usergitconfig").getAbsoluteFile();
-		userGitConfig = new RepositoryConfig(null, userGitConfigFile);
-		fakeSystemReader.setUserGitConfig(userGitConfig);
+		final MockSystemReader mockSystemReader = new MockSystemReader();
+		mockSystemReader.userGitConfig = new FileBasedConfig(new File(
+				trash_git, "usergitconfig"));
+		SystemReader.setInstance(mockSystemReader);
 
 		db = new Repository(trash_git);
 		db.create();
@@ -285,6 +249,7 @@ public abstract class RepositoryTestCase extends TestCase {
 				"pack-df2982f284bbabb6bdb59ee3fcc6eb0983e20371",
 				"pack-9fb5b411fe6dfa89cc2e6b89d2bd8e5de02b5745",
 				"pack-546ff360fe3488adb20860ce3436a2d6373d2796",
+				"pack-cbdeda40019ae0e6e789088ea0f51f164f489d14",
 				"pack-e6d07037cbcf13376308a0a995d1fa48f8f76aaa",
 				"pack-3280af9c07ee18a87705ef50b0cc4cd20266cf12"
 		};
@@ -297,16 +262,10 @@ public abstract class RepositoryTestCase extends TestCase {
 		}
 
 		copyFile(JGitTestUtil.getTestResourceFile("packed-refs"), new File(trash_git,"packed-refs"));
-
-		fakeSystemReader.values.clear();
-		fakeSystemReader.values.put(Constants.OS_USER_NAME_KEY, Constants.OS_USER_NAME_KEY);
-		fakeSystemReader.values.put(Constants.GIT_AUTHOR_NAME_KEY, Constants.GIT_AUTHOR_NAME_KEY);
-		fakeSystemReader.values.put(Constants.GIT_AUTHOR_EMAIL_KEY, Constants.GIT_AUTHOR_EMAIL_KEY);
-		fakeSystemReader.values.put(Constants.GIT_COMMITTER_NAME_KEY, Constants.GIT_COMMITTER_NAME_KEY);
-		fakeSystemReader.values.put(Constants.GIT_COMMITTER_EMAIL_KEY, Constants.GIT_COMMITTER_EMAIL_KEY);
 	}
 
 	protected void tearDown() throws Exception {
+		RepositoryCache.clear();
 		db.close();
 		for (Repository r : repositoriesToClose)
 			r.close();
@@ -334,8 +293,21 @@ public abstract class RepositoryTestCase extends TestCase {
 	 * @throws IOException
 	 */
 	protected Repository createNewEmptyRepo() throws IOException {
+		return createNewEmptyRepo(false);
+	}
+
+	/**
+	 * Helper for creating extra empty repos
+	 *
+	 * @param bare if true, create a bare repository.
+	 * @return a new empty git repository for testing purposes
+	 *
+	 * @throws IOException
+	 */
+	protected Repository createNewEmptyRepo(boolean bare) throws IOException {
 		final File newTestRepo = new File(trashParent, "new"
-				+ System.currentTimeMillis() + "." + (testcount++) + "/.git");
+				+ System.currentTimeMillis() + "." + (testcount++)
+				+ (bare ? "" : "/") + ".git");
 		assertFalse(newTestRepo.exists());
 		final Repository newRepo = new Repository(newTestRepo);
 		newRepo.create();

@@ -52,6 +52,8 @@ import java.util.Map;
 import org.spearce.jgit.errors.ObjectWritingException;
 import org.spearce.jgit.lib.Ref.Storage;
 import org.spearce.jgit.util.FS;
+import org.spearce.jgit.util.NB;
+import org.spearce.jgit.util.RawParseUtils;
 
 class RefDatabase {
 	private static final String REFS_SLASH = "refs/";
@@ -438,7 +440,7 @@ class RefDatabase {
 
 					final int sp = p.indexOf(' ');
 					final ObjectId id = ObjectId.fromString(p.substring(0, sp));
-					final String name = new String(p.substring(sp + 1));
+					final String name = copy(p, sp + 1, p.length());
 					last = new Ref(Ref.Storage.PACKED, name, name, id);
 					newPackedRefs.put(last.getName(), last);
 				}
@@ -458,6 +460,10 @@ class RefDatabase {
 		} catch (IOException e) {
 			throw new RuntimeException("Cannot read packed refs", e);
 		}
+	}
+
+	private static String copy(final String src, final int off, final int end) {
+		return new StringBuilder(end - off).append(src, off, end).toString();
 	}
 
 	private void lockAndWriteFile(File file, byte[] content) throws IOException {
@@ -490,12 +496,13 @@ class RefDatabase {
 
 	private static String readLine(final File file)
 			throws FileNotFoundException, IOException {
-		final BufferedReader br = openReader(file);
-		try {
-			return br.readLine();
-		} finally {
-			br.close();
-		}
+		final byte[] buf = NB.readFully(file, 4096);
+		int n = buf.length;
+		if (n == 0)
+			return null;
+		if (buf[n - 1] == '\n')
+			n--;
+		return RawParseUtils.decode(buf, 0, n);
 	}
 
 	private static BufferedReader openReader(final File fileLocation)
