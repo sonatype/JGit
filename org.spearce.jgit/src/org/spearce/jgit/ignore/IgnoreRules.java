@@ -131,7 +131,7 @@ public class IgnoreRules {
 			throw new IllegalArgumentException("file must be inside the repositories working directory! " + toCheckFor.getAbsolutePath());
 		}
 		
-		File repoDir = db.getWorkDir();
+		File repoDir = db.getWorkDir().getAbsoluteFile();
 		File parseDir = toCheckFor;
 		do {
 			parseDir = parseDir.getParentFile();
@@ -152,7 +152,7 @@ public class IgnoreRules {
 					}
 				}
 			}
-		} while (!parseDir.equals(repoDir));
+		} while (!parseDir.getAbsoluteFile().equals(repoDir));
 		
 		return false;
 	}
