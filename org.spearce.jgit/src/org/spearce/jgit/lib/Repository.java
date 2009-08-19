@@ -54,10 +54,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.spearce.jgit.errors.ConfigInvalidException;
 import org.spearce.jgit.errors.IncorrectObjectTypeException;
 import org.spearce.jgit.errors.RevisionSyntaxException;
 import org.spearce.jgit.util.FS;
+import org.spearce.jgit.util.SystemReader;
 
 /**
  * Represents a Git repository. A repository holds all objects and refs used for
@@ -85,6 +88,8 @@ import org.spearce.jgit.util.FS;
  *
  */
 public class Repository {
+	private final AtomicInteger useCnt = new AtomicInteger(1);
+
 	private final File gitDir;
 
 	private final RepositoryConfig config;
@@ -95,8 +100,8 @@ public class Repository {
 
 	private GitIndex index;
 
-	private List<RepositoryListener> listeners = new Vector<RepositoryListener>(); // thread safe
-	static private List<RepositoryListener> allListeners = new Vector<RepositoryListener>(); // thread safe
+	private final List<RepositoryListener> listeners = new Vector<RepositoryListener>(); // thread safe
+	static private final List<RepositoryListener> allListeners = new Vector<RepositoryListener>(); // thread safe
 
 	/**
 	 * Construct a representation of a Git repository.
@@ -111,18 +116,34 @@ public class Repository {
 		gitDir = d.getAbsoluteFile();
 		refs = new RefDatabase(this);
 		objectDatabase = new ObjectDirectory(FS.resolve(gitDir, "objects"));
-		config = new RepositoryConfig(this);
+
+		final FileBasedConfig userConfig;
+		userConfig = SystemReader.getInstance().openUserConfig();
+		try {
+			userConfig.load();
+		} catch (ConfigInvalidException e1) {
+			IOException e2 = new IOException("User config file "
+					+ userConfig.getFile().getAbsolutePath() + " invalid: "
+					+ e1);
+			e2.initCause(e1);
+			throw e2;
+		}
+		config = new RepositoryConfig(userConfig, FS.resolve(gitDir, "config"));
 
 		if (objectDatabase.exists()) {
-			getConfig().load();
+			try {
+				getConfig().load();
+			} catch (ConfigInvalidException e1) {
+				IOException e2 = new IOException("Unknown repository format");
+				e2.initCause(e1);
+				throw e2;
+			}
 			final String repositoryFormatVersion = getConfig().getString(
 					"core", null, "repositoryFormatVersion");
 			if (!"0".equals(repositoryFormatVersion)) {
 				throw new IOException("Unknown repository format \""
 						+ repositoryFormatVersion + "\"; expected \"0\".");
 			}
-		} else {
-			getConfig().create();
 		}
 	}
 
@@ -148,7 +169,8 @@ public class Repository {
 	 *             in case of IO problem
 	 */
 	public void create(boolean bare) throws IOException {
-		if ((bare ? new File(gitDir, "config") : gitDir).exists()) {
+		final RepositoryConfig cfg = getConfig();
+		if (cfg.getFile().exists()) {
 			throw new IllegalStateException("Repository already exists: "
 					+ gitDir);
 		}
@@ -161,11 +183,10 @@ public class Repository {
 		final String master = Constants.R_HEADS + Constants.MASTER;
 		refs.link(Constants.HEAD, master);
 
-		RepositoryConfig cfg = getConfig();
-		cfg.create();
-		if (bare) {
-			cfg.setString("core", null, "bare", "true");
-		}
+		cfg.setInt("core", null, "repositoryformatversion", 0);
+		cfg.setBoolean("core", null, "filemode", true);
+		if (bare)
+			cfg.setBoolean("core", null, "bare", true);
 		cfg.save();
 	}
 
@@ -181,6 +202,13 @@ public class Repository {
 	 */
 	public File getObjectsDirectory() {
 		return objectDatabase.getDirectory();
+	}
+
+	/**
+	 * @return the object database which stores this repository's data.
+	 */
+	public ObjectDatabase getObjectDatabase() {
+		return objectDatabase;
 	}
 
 	/**
@@ -721,11 +749,17 @@ public class Repository {
 		return r != null ? r.getObjectId() : null;
 	}
 
+	/** Increment the use counter by one, requiring a matched {@link #close()}. */
+	public void incrementOpen() {
+		useCnt.incrementAndGet();
+	}
+
 	/**
 	 * Close all resources used by this repository
 	 */
 	public void close() {
-		objectDatabase.close();
+		if (useCnt.decrementAndGet() == 0)
+			objectDatabase.close();
 	}
 
 	/**

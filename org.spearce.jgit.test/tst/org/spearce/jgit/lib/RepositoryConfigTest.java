@@ -40,147 +40,131 @@
 
 package org.spearce.jgit.lib;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.LinkedList;
+
+import junit.framework.TestCase;
+
+import org.spearce.jgit.errors.ConfigInvalidException;
+import org.spearce.jgit.util.SystemReader;
 
 /**
  * Test reading of git config
  */
-public class RepositoryConfigTest extends RepositoryTestCase {
-	/**
-	 * Read config item with no value from a section without a subsection.
-	 *
-	 * @throws IOException
-	 */
-	public void test001_ReadBareKey() throws IOException {
-		final RepositoryConfig repositoryConfig = read("[foo]\nbar\n");
-		assertEquals(true, repositoryConfig.getBoolean("foo", null, "bar", false));
-		assertEquals("", repositoryConfig.getString("foo", null, "bar"));
+public class RepositoryConfigTest extends TestCase {
+	public void test001_ReadBareKey() throws ConfigInvalidException {
+		final Config c = parse("[foo]\nbar\n");
+		assertEquals(true, c.getBoolean("foo", null, "bar", false));
+		assertEquals("", c.getString("foo", null, "bar"));
 	}
 
-	/**
-	 * Read various data from a subsection.
-	 *
-	 * @throws IOException
-	 */
-	public void test002_ReadWithSubsection() throws IOException {
-		final RepositoryConfig repositoryConfig = read("[foo \"zip\"]\nbar\n[foo \"zap\"]\nbar=false\nn=3\n");
-		assertEquals(true, repositoryConfig.getBoolean("foo", "zip", "bar", false));
-		assertEquals("", repositoryConfig.getString("foo","zip", "bar"));
-		assertEquals(false, repositoryConfig.getBoolean("foo", "zap", "bar", true));
-		assertEquals("false", repositoryConfig.getString("foo", "zap", "bar"));
-		assertEquals(3, repositoryConfig.getInt("foo", "zap", "n", 4));
-		assertEquals(4, repositoryConfig.getInt("foo", "zap","m", 4));
+	public void test002_ReadWithSubsection() throws ConfigInvalidException {
+		final Config c = parse("[foo \"zip\"]\nbar\n[foo \"zap\"]\nbar=false\nn=3\n");
+		assertEquals(true, c.getBoolean("foo", "zip", "bar", false));
+		assertEquals("", c.getString("foo","zip", "bar"));
+		assertEquals(false, c.getBoolean("foo", "zap", "bar", true));
+		assertEquals("false", c.getString("foo", "zap", "bar"));
+		assertEquals(3, c.getInt("foo", "zap", "n", 4));
+		assertEquals(4, c.getInt("foo", "zap","m", 4));
 	}
 
-	public void test003_PutRemote() throws IOException {
-		File cfgFile = writeTrashFile("config_003", "");
-		RepositoryConfig repositoryConfig = new RepositoryConfig(null, cfgFile);
-		repositoryConfig.setString("sec", "ext", "name", "value");
-		repositoryConfig.setString("sec", "ext", "name2", "value2");
-		repositoryConfig.save();
-		checkFile(cfgFile, "[sec \"ext\"]\n\tname = value\n\tname2 = value2\n");
+	public void test003_PutRemote() {
+		final Config c = new Config();
+		c.setString("sec", "ext", "name", "value");
+		c.setString("sec", "ext", "name2", "value2");
+		final String expText = "[sec \"ext\"]\n\tname = value\n\tname2 = value2\n";
+		assertEquals(expText, c.toText());
 	}
 
-	public void test004_PutGetSimple() throws IOException {
-		File cfgFile = writeTrashFile("config_004", "");
-		RepositoryConfig repositoryConfig = new RepositoryConfig(null, cfgFile);
-		repositoryConfig.setString("my", null, "somename", "false");
-		repositoryConfig.save();
-		checkFile(cfgFile, "[my]\n\tsomename = false\n");
-		assertEquals("false", repositoryConfig
-				.getString("my", null, "somename"));
+	public void test004_PutGetSimple() {
+		Config c = new Config();
+		c.setString("my", null, "somename", "false");
+		assertEquals("false", c.getString("my", null, "somename"));
+		assertEquals("[my]\n\tsomename = false\n", c.toText());
 	}
 
-	public void test005_PutGetStringList() throws IOException {
-		File cfgFile = writeTrashFile("config_005", "");
-		RepositoryConfig repositoryConfig = new RepositoryConfig(null, cfgFile);
+	public void test005_PutGetStringList() {
+		Config c = new Config();
 		final LinkedList<String> values = new LinkedList<String>();
 		values.add("value1");
 		values.add("value2");
-		repositoryConfig.setStringList("my", null, "somename", values);
-		repositoryConfig.save();
-		assertTrue(Arrays.equals(values.toArray(), repositoryConfig
-				.getStringList("my", null, "somename")));
-		checkFile(cfgFile, "[my]\n\tsomename = value1\n\tsomename = value2\n");
+		c.setStringList("my", null, "somename", values);
+
+		final Object[] expArr = values.toArray();
+		final String[] actArr = c.getStringList("my", null, "somename");
+		assertTrue(Arrays.equals(expArr, actArr));
+
+		final String expText = "[my]\n\tsomename = value1\n\tsomename = value2\n";
+		assertEquals(expText, c.toText());
 	}
 
-	public void test006_readCaseInsensitive() throws IOException {
-		final RepositoryConfig repositoryConfig = read("[Foo]\nBar\n");
-		assertEquals(true, repositoryConfig.getBoolean("foo", null, "bar", false));
-		assertEquals("", repositoryConfig.getString("foo", null, "bar"));
+	public void test006_readCaseInsensitive() throws ConfigInvalidException {
+		final Config c = parse("[Foo]\nBar\n");
+		assertEquals(true, c.getBoolean("foo", null, "bar", false));
+		assertEquals("", c.getString("foo", null, "bar"));
 	}
 
-	public void test007_readUserInfos() throws IOException {
-		String hostname;
-		try {
-			InetAddress localMachine = InetAddress.getLocalHost();
-			hostname = localMachine.getCanonicalHostName();
-		} catch (UnknownHostException e) {
-			hostname = "localhost";
-		}
-
-		final File localConfig = writeTrashFile("local.config", "");
-		System.clearProperty(Constants.OS_USER_NAME_KEY);
-
-		RepositoryConfig localRepositoryConfig = new RepositoryConfig(userGitConfig, localConfig);
-		fakeSystemReader.values.clear();
+	public void test007_readUserConfig() {
+		final MockSystemReader mockSystemReader = new MockSystemReader();
+		SystemReader.setInstance(mockSystemReader);
+		final String hostname = mockSystemReader.getHostname();
+		final Config userGitConfig = mockSystemReader.userGitConfig;
+		final Config localConfig = new Config(userGitConfig);
+		mockSystemReader.values.clear();
 
 		String authorName;
 		String authorEmail;
 
 		// no values defined nowhere
-		authorName = localRepositoryConfig.getAuthorName();
-		authorEmail = localRepositoryConfig.getAuthorEmail();
+		authorName = localConfig.get(UserConfig.KEY).getAuthorName();
+		authorEmail = localConfig.get(UserConfig.KEY).getAuthorEmail();
 		assertEquals(Constants.UNKNOWN_USER_DEFAULT, authorName);
 		assertEquals(Constants.UNKNOWN_USER_DEFAULT + "@" + hostname, authorEmail);
 
 		// the system user name is defined
-		fakeSystemReader.values.put(Constants.OS_USER_NAME_KEY, "os user name");
-		authorName = localRepositoryConfig.getAuthorName();
+		mockSystemReader.values.put(Constants.OS_USER_NAME_KEY, "os user name");
+		localConfig.uncache(UserConfig.KEY);
+		authorName = localConfig.get(UserConfig.KEY).getAuthorName();
 		assertEquals("os user name", authorName);
 
 		if (hostname != null && hostname.length() != 0) {
-			authorEmail = localRepositoryConfig.getAuthorEmail();
+			authorEmail = localConfig.get(UserConfig.KEY).getAuthorEmail();
 			assertEquals("os user name@" + hostname, authorEmail);
 		}
 
 		// the git environment variables are defined
-		fakeSystemReader.values.put(Constants.GIT_AUTHOR_NAME_KEY, "git author name");
-		fakeSystemReader.values.put(Constants.GIT_AUTHOR_EMAIL_KEY, "author@email");
-		authorName = localRepositoryConfig.getAuthorName();
-		authorEmail = localRepositoryConfig.getAuthorEmail();
+		mockSystemReader.values.put(Constants.GIT_AUTHOR_NAME_KEY, "git author name");
+		mockSystemReader.values.put(Constants.GIT_AUTHOR_EMAIL_KEY, "author@email");
+		localConfig.uncache(UserConfig.KEY);
+		authorName = localConfig.get(UserConfig.KEY).getAuthorName();
+		authorEmail = localConfig.get(UserConfig.KEY).getAuthorEmail();
 		assertEquals("git author name", authorName);
 		assertEquals("author@email", authorEmail);
 
 		// the values are defined in the global configuration
 		userGitConfig.setString("user", null, "name", "global username");
 		userGitConfig.setString("user", null, "email", "author@globalemail");
-		authorName = localRepositoryConfig.getAuthorName();
-		authorEmail = localRepositoryConfig.getAuthorEmail();
+		authorName = localConfig.get(UserConfig.KEY).getAuthorName();
+		authorEmail = localConfig.get(UserConfig.KEY).getAuthorEmail();
 		assertEquals("global username", authorName);
 		assertEquals("author@globalemail", authorEmail);
 
 		// the values are defined in the local configuration
-		localRepositoryConfig.setString("user", null, "name", "local username");
-		localRepositoryConfig.setString("user", null, "email", "author@localemail");
-		authorName = localRepositoryConfig.getAuthorName();
-		authorEmail = localRepositoryConfig.getAuthorEmail();
+		localConfig.setString("user", null, "name", "local username");
+		localConfig.setString("user", null, "email", "author@localemail");
+		authorName = localConfig.get(UserConfig.KEY).getAuthorName();
+		authorEmail = localConfig.get(UserConfig.KEY).getAuthorEmail();
 		assertEquals("local username", authorName);
 		assertEquals("author@localemail", authorEmail);
 
-		authorName = localRepositoryConfig.getCommitterName();
-		authorEmail = localRepositoryConfig.getCommitterEmail();
+		authorName = localConfig.get(UserConfig.KEY).getCommitterName();
+		authorEmail = localConfig.get(UserConfig.KEY).getCommitterEmail();
 		assertEquals("local username", authorName);
 		assertEquals("author@localemail", authorEmail);
 	}
 
-	public void testReadBoolean_TrueFalse1() throws IOException {
-		final RepositoryConfig c = read("[s]\na = true\nb = false\n");
+	public void testReadBoolean_TrueFalse1() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = true\nb = false\n");
 		assertEquals("true", c.getString("s", null, "a"));
 		assertEquals("false", c.getString("s", null, "b"));
 
@@ -188,8 +172,8 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadBoolean_TrueFalse2() throws IOException {
-		final RepositoryConfig c = read("[s]\na = TrUe\nb = fAlSe\n");
+	public void testReadBoolean_TrueFalse2() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = TrUe\nb = fAlSe\n");
 		assertEquals("TrUe", c.getString("s", null, "a"));
 		assertEquals("fAlSe", c.getString("s", null, "b"));
 
@@ -197,8 +181,8 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadBoolean_YesNo1() throws IOException {
-		final RepositoryConfig c = read("[s]\na = yes\nb = no\n");
+	public void testReadBoolean_YesNo1() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = yes\nb = no\n");
 		assertEquals("yes", c.getString("s", null, "a"));
 		assertEquals("no", c.getString("s", null, "b"));
 
@@ -206,8 +190,8 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadBoolean_YesNo2() throws IOException {
-		final RepositoryConfig c = read("[s]\na = yEs\nb = NO\n");
+	public void testReadBoolean_YesNo2() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = yEs\nb = NO\n");
 		assertEquals("yEs", c.getString("s", null, "a"));
 		assertEquals("NO", c.getString("s", null, "b"));
 
@@ -215,8 +199,8 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadBoolean_OnOff1() throws IOException {
-		final RepositoryConfig c = read("[s]\na = on\nb = off\n");
+	public void testReadBoolean_OnOff1() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = on\nb = off\n");
 		assertEquals("on", c.getString("s", null, "a"));
 		assertEquals("off", c.getString("s", null, "b"));
 
@@ -224,8 +208,8 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadBoolean_OnOff2() throws IOException {
-		final RepositoryConfig c = read("[s]\na = ON\nb = OFF\n");
+	public void testReadBoolean_OnOff2() throws ConfigInvalidException {
+		final Config c = parse("[s]\na = ON\nb = OFF\n");
 		assertEquals("ON", c.getString("s", null, "a"));
 		assertEquals("OFF", c.getString("s", null, "b"));
 
@@ -233,7 +217,7 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		assertFalse(c.getBoolean("s", "b", true));
 	}
 
-	public void testReadLong() throws IOException {
+	public void testReadLong() throws ConfigInvalidException {
 		assertReadLong(1L);
 		assertReadLong(-1L);
 		assertReadLong(Long.MIN_VALUE);
@@ -250,18 +234,19 @@ public class RepositoryConfigTest extends RepositoryTestCase {
 		}
 	}
 
-	private void assertReadLong(long exp) throws IOException {
+	private void assertReadLong(long exp) throws ConfigInvalidException {
 		assertReadLong(exp, String.valueOf(exp));
 	}
 
-	private void assertReadLong(long exp, String act) throws IOException {
-		final RepositoryConfig c = read("[s]\na = " + act + "\n");
+	private void assertReadLong(long exp, String act)
+			throws ConfigInvalidException {
+		final Config c = parse("[s]\na = " + act + "\n");
 		assertEquals(exp, c.getLong("s", null, "a", 0L));
 	}
 
-	private RepositoryConfig read(final String content) throws IOException {
-		final File p = writeTrashFile(getName() + ".config", content);
-		final RepositoryConfig c = new RepositoryConfig(null, p);
+	private Config parse(final String content) throws ConfigInvalidException {
+		final Config c = new Config(null);
+		c.fromText(content);
 		return c;
 	}
 }

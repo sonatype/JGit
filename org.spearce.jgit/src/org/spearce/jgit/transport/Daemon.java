@@ -46,13 +46,15 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketAddress;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.Repository;
+import org.spearce.jgit.lib.RepositoryCache;
+import org.spearce.jgit.lib.RepositoryCache.FileKey;
 
 /** Basic daemon for the anonymous <code>git://</code> transport protocol. */
 public class Daemon {
@@ -67,7 +69,7 @@ public class Daemon {
 
 	private final ThreadGroup processors;
 
-	private boolean exportAll;
+	private volatile boolean exportAll;
 
 	private Map<String, Repository> exports;
 
@@ -93,8 +95,8 @@ public class Daemon {
 	 */
 	public Daemon(final InetSocketAddress addr) {
 		myAddress = addr;
-		exports = new HashMap<String, Repository>();
-		exportBase = new ArrayList<File>();
+		exports = new ConcurrentHashMap<String, Repository>();
+		exportBase = new CopyOnWriteArrayList<File>();
 		processors = new ThreadGroup("Git-Daemon");
 
 		services = new DaemonService[] {
@@ -164,7 +166,7 @@ public class Daemon {
 	 *         ignored.
 	 * @see #setExportAll(boolean)
 	 */
-	public synchronized boolean isExportAll() {
+	public boolean isExportAll() {
 		return exportAll;
 	}
 
@@ -180,7 +182,7 @@ public class Daemon {
 	 *
 	 * @param export
 	 */
-	public synchronized void setExportAll(final boolean export) {
+	public void setExportAll(final boolean export) {
 		exportAll = export;
 	}
 
@@ -195,10 +197,11 @@ public class Daemon {
 	 * @param db
 	 *            the repository instance.
 	 */
-	public void exportRepository(final String name, final Repository db) {
-		synchronized (exports) {
-			exports.put(name, db);
-		}
+	public void exportRepository(String name, final Repository db) {
+		if (!name.endsWith(".git"))
+			name = name + ".git";
+		exports.put(name, db);
+		RepositoryCache.register(db);
 	}
 
 	/**
@@ -210,9 +213,7 @@ public class Daemon {
 	 *            named <code>git-daemon-export-ok</code> will be published.
 	 */
 	public void exportDirectory(final File dir) {
-		synchronized (exportBase) {
-			exportBase.add(dir);
-		}
+		exportBase.add(dir);
 	}
 
 	/** @return timeout (in seconds) before aborting an IO operation. */
@@ -351,45 +352,28 @@ public class Daemon {
 		name = name.substring(1);
 
 		Repository db;
-		synchronized (exports) {
-			db = exports.get(name);
-			if (db != null)
-				return db;
-
-			db = exports.get(name + ".git");
-			if (db != null)
-				return db;
+		db = exports.get(name.endsWith(".git") ? name : name + ".git");
+		if (db != null) {
+			db.incrementOpen();
+			return db;
 		}
 
-		final File[] search;
-		synchronized (exportBase) {
-			search = exportBase.toArray(new File[exportBase.size()]);
-		}
-		for (final File f : search) {
-			db = openRepository(new File(f, name));
-			if (db != null)
-				return db;
-
-			db = openRepository(new File(f, name + ".git"));
-			if (db != null)
-				return db;
-
-			db = openRepository(new File(f, name + "/.git"));
-			if (db != null)
-				return db;
+		for (final File baseDir : exportBase) {
+			final File gitdir = FileKey.resolve(new File(baseDir, name));
+			if (gitdir != null && canExport(gitdir))
+				return openRepository(gitdir);
 		}
 		return null;
 	}
 
-	private Repository openRepository(final File d) {
-		if (d.isDirectory() && canExport(d)) {
-			try {
-				return new Repository(d);
-			} catch (IOException err) {
-				// Ignore
-			}
+	private static Repository openRepository(final File gitdir) {
+		try {
+			return RepositoryCache.open(FileKey.exact(gitdir));
+		} catch (IOException err) {
+			// null signals it "wasn't found", which is all that is suitable
+			// for the remote client to know.
+			return null;
 		}
-		return null;
 	}
 
 	private boolean canExport(final File d) {

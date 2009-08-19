@@ -40,21 +40,29 @@
  */
 package org.spearce.jgit.lib;
 
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
+import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStreamWriter;
-import java.io.PrintWriter;
+
+import org.spearce.jgit.errors.ConfigInvalidException;
+import org.spearce.jgit.util.NB;
+import org.spearce.jgit.util.RawParseUtils;
 
 /**
  * The configuration file that is stored in the file of the file system.
  */
 public class FileBasedConfig extends Config {
-
 	private final File configFile;
+
+	/**
+	 * Create a configuration with no default fallback.
+	 *
+	 * @param cfgLocation
+	 *            the location of the configuration file on the file system
+	 */
+	public FileBasedConfig(File cfgLocation) {
+		this(null, cfgLocation);
+	}
 
 	/**
 	 * The constructor
@@ -69,52 +77,64 @@ public class FileBasedConfig extends Config {
 		configFile = cfgLocation;
 	}
 
-	/**
-	 * Save config data to the git config file
-	 *
-	 * @throws IOException
-	 */
-	public void save() throws IOException {
-		final File tmp = new File(configFile.getParentFile(), configFile
-				.getName()
-				+ ".lock");
-		final PrintWriter r = new PrintWriter(new BufferedWriter(
-				new OutputStreamWriter(new FileOutputStream(tmp),
-						Constants.CHARSET))) {
-			@Override
-			public void println() {
-				print('\n');
-			}
-		};
-		boolean ok = false;
-		try {
-			printConfig(r);
-			ok = true;
-			r.close();
-			if (!tmp.renameTo(configFile)) {
-				configFile.delete();
-				if (!tmp.renameTo(configFile))
-					throw new IOException("Cannot save config file "
-							+ configFile + ", rename failed");
-			}
-		} finally {
-			r.close();
-			if (tmp.exists() && !tmp.delete()) {
-				System.err
-						.println("(warning) failed to delete tmp config file: "
-								+ tmp);
-			}
-		}
-		setFileRead(ok);
+	/** @return location of the configuration file on disk */
+	public final File getFile() {
+		return configFile;
 	}
 
-	@Override
-	protected InputStream openInputStream() throws IOException {
-		return new FileInputStream(configFile);
+	/**
+	 * Load the configuration as a Git text style configuration file.
+	 * <p>
+	 * If the file does not exist, this configuration is cleared, and thus
+	 * behaves the same as though the file exists, but is empty.
+	 *
+	 * @throws IOException
+	 *             the file could not be read (but does exist).
+	 * @throws ConfigInvalidException
+	 *             the file is not a properly formatted configuration file.
+	 */
+	public void load() throws IOException, ConfigInvalidException {
+		try {
+			fromText(RawParseUtils.decode(NB.readFully(getFile())));
+		} catch (FileNotFoundException noFile) {
+			clear();
+		} catch (IOException e) {
+			final IOException e2 = new IOException("Cannot read " + getFile());
+			e2.initCause(e);
+			throw e2;
+		} catch (ConfigInvalidException e) {
+			throw new ConfigInvalidException("Cannot read " + getFile(), e);
+		}
+	}
+
+	/**
+	 * Save the configuration as a Git text style configuration file.
+	 * <p>
+	 * <b>Warning:</b> Although this method uses the traditional Git file
+	 * locking approach to protect against concurrent writes of the
+	 * configuration file, it does not ensure that the file has not been
+	 * modified since the last read, which means updates performed by other
+	 * objects accessing the same backing file may be lost.
+	 *
+	 * @throws IOException
+	 *             the file could not be written.
+	 */
+	public void save() throws IOException {
+		final byte[] out = Constants.encode(toText());
+		final LockFile lf = new LockFile(getFile());
+		if (!lf.lock())
+			throw new IOException("Cannot lock " + getFile());
+		try {
+			lf.write(out);
+			if (!lf.commit())
+				throw new IOException("Cannot commit write to " + getFile());
+		} finally {
+			lf.unlock();
+		}
 	}
 
 	@Override
 	public String toString() {
-		return getClass().getSimpleName() + "[" + configFile.getPath() + "]";
+		return getClass().getSimpleName() + "[" + getFile().getPath() + "]";
 	}
 }

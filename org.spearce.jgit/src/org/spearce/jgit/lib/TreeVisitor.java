@@ -77,4 +77,12 @@ public interface TreeVisitor {
 	 * @throws IOException
 	 */
 	public void visitSymlink(final SymlinkTreeEntry s) throws IOException;
+
+	/**
+	 * Visit to a gitlink.
+	 *
+	 * @param s Gitlink entry
+	 * @throws IOException
+	 */
+	public void visitGitlink(final GitlinkTreeEntry s) throws IOException;
 }

@@ -46,26 +46,27 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import org.spearce.jgit.errors.MissingObjectException;
 import org.spearce.jgit.errors.PackProtocolException;
+import org.spearce.jgit.lib.Config;
 import org.spearce.jgit.lib.Constants;
 import org.spearce.jgit.lib.NullProgressMonitor;
 import org.spearce.jgit.lib.ObjectId;
 import org.spearce.jgit.lib.PackLock;
 import org.spearce.jgit.lib.PersonIdent;
 import org.spearce.jgit.lib.Ref;
-import org.spearce.jgit.lib.RefComparator;
 import org.spearce.jgit.lib.RefUpdate;
 import org.spearce.jgit.lib.Repository;
-import org.spearce.jgit.lib.RepositoryConfig;
+import org.spearce.jgit.lib.Config.SectionParser;
 import org.spearce.jgit.revwalk.ObjectWalk;
 import org.spearce.jgit.revwalk.RevCommit;
+import org.spearce.jgit.revwalk.RevFlag;
 import org.spearce.jgit.revwalk.RevObject;
 import org.spearce.jgit.revwalk.RevWalk;
 import org.spearce.jgit.transport.ReceiveCommand.Result;
@@ -158,15 +159,43 @@ public class ReceivePack {
 		db = into;
 		walk = new RevWalk(db);
 
-		final RepositoryConfig cfg = db.getConfig();
-		checkReceivedObjects = cfg.getBoolean("receive", "fsckobjects", false);
-		allowCreates = true;
-		allowDeletes = !cfg.getBoolean("receive", "denydeletes", false);
-		allowNonFastForwards = !cfg.getBoolean("receive",
-				"denynonfastforwards", false);
-		allowOfsDelta = cfg.getBoolean("repack", "usedeltabaseoffset", true);
+		final ReceiveConfig cfg = db.getConfig().get(ReceiveConfig.KEY);
+		checkReceivedObjects = cfg.checkReceivedObjects;
+		allowCreates = cfg.allowCreates;
+		allowDeletes = cfg.allowDeletes;
+		allowNonFastForwards = cfg.allowNonFastForwards;
+		allowOfsDelta = cfg.allowOfsDelta;
 		preReceive = PreReceiveHook.NULL;
 		postReceive = PostReceiveHook.NULL;
+	}
+
+	private static class ReceiveConfig {
+		static final SectionParser<ReceiveConfig> KEY = new SectionParser<ReceiveConfig>() {
+			public ReceiveConfig parse(final Config cfg) {
+				return new ReceiveConfig(cfg);
+			}
+		};
+
+		final boolean checkReceivedObjects;
+
+		final boolean allowCreates;
+
+		final boolean allowDeletes;
+
+		final boolean allowNonFastForwards;
+
+		final boolean allowOfsDelta;
+
+		ReceiveConfig(final Config config) {
+			checkReceivedObjects = config.getBoolean("receive", "fsckobjects",
+					false);
+			allowCreates = true;
+			allowDeletes = !config.getBoolean("receive", "denydeletes", false);
+			allowNonFastForwards = !config.getBoolean("receive",
+					"denynonfastforwards", false);
+			allowOfsDelta = config.getBoolean("repack", "usedeltabaseoffset",
+					true);
+		}
 	}
 
 	/** @return the repository this receive completes into. */
@@ -503,55 +532,21 @@ public class ReceivePack {
 	}
 
 	private void sendAdvertisedRefs() throws IOException {
-		refs = db.getAllRefs();
-
-		final StringBuilder m = new StringBuilder(100);
-		final char[] idtmp = new char[2 * Constants.OBJECT_ID_LENGTH];
-		final Iterator<Ref> i = RefComparator.sort(refs.values()).iterator();
-		boolean first = true;
-		while (i.hasNext()) {
-			final Ref r = i.next();
-			if (r.getObjectId() == null)
-				continue;
-			format(m, idtmp, r.getObjectId(), r.getOrigName());
-			if (first) {
-				first = false;
-				advertiseCapabilities(m);
-			}
-			writeAdvertisedRef(m);
-		}
-		if (first) {
-			format(m, idtmp, ObjectId.zeroId(), "capabilities^{}");
-			advertiseCapabilities(m);
-			writeAdvertisedRef(m);
-		}
+		final RevFlag advertised = walk.newFlag("ADVERTISED");
+		final RefAdvertiser adv = new RefAdvertiser(pckOut, walk, advertised);
+		adv.advertiseCapability(CAPABILITY_DELETE_REFS);
+		adv.advertiseCapability(CAPABILITY_REPORT_STATUS);
+		if (allowOfsDelta)
+			adv.advertiseCapability(CAPABILITY_OFS_DELTA);
+		refs = new HashMap<String, Ref>(db.getAllRefs());
+		final Ref head = refs.remove(Constants.HEAD);
+		adv.send(refs.values());
+		if (head != null && head.getName().equals(head.getOrigName()))
+			adv.advertiseHave(head.getObjectId());
+		adv.includeAdditionalHaves();
+		if (adv.isEmpty())
+			adv.advertiseId(ObjectId.zeroId(), "capabilities^{}");
 		pckOut.end();
-	}
-
-	private void advertiseCapabilities(final StringBuilder m) {
-		m.append('\0');
-		m.append(' ');
-		m.append(CAPABILITY_DELETE_REFS);
-		m.append(' ');
-		m.append(CAPABILITY_REPORT_STATUS);
-		if (allowOfsDelta) {
-			m.append(' ');
-			m.append(CAPABILITY_OFS_DELTA);
-		}
-		m.append(' ');
-	}
-
-	private void format(final StringBuilder m, final char[] idtmp,
-			final ObjectId id, final String name) {
-		m.setLength(0);
-		id.copyTo(idtmp, m);
-		m.append(' ');
-		m.append(name);
-	}
-
-	private void writeAdvertisedRef(final StringBuilder m) throws IOException {
-		m.append('\n');
-		pckOut.writeString(m.toString());
 	}
 
 	private void recvCommands() throws IOException {

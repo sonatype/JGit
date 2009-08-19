@@ -4,6 +4,7 @@
  * Copyright (C) 2008, Shawn O. Pearce <spearce@spearce.org>
  * Copyright (C) 2008, Thad Hughes <thadh@thad.corp.google.com>
  * Copyright (C) 2009, JetBrains s.r.o.
+ * Copyright (C) 2009, Google, Inc.
  *
  * All rights reserved.
  *
@@ -40,63 +41,62 @@
  */
 package org.spearce.jgit.lib;
 
-import java.io.BufferedReader;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+
+import org.spearce.jgit.errors.ConfigInvalidException;
+import org.spearce.jgit.util.StringUtils;
+
 
 /**
- * The configuration file stored in the format similar to the ".git/config"
- * file.
+ * Git style {@code .config}, {@code .gitconfig}, {@code .gitmodules} file.
  */
-public abstract class Config {
-
-	private boolean readFile;
-
-	private List<Entry> entries;
-
-	final Config baseConfig;
+public class Config {
+	private static final String[] EMPTY_STRING_ARRAY = {};
+	private static final long KiB = 1024;
+	private static final long MiB = 1024 * KiB;
+	private static final long GiB = 1024 * MiB;
 
 	/**
-	 * Map from name to values
+	 * Immutable current state of the configuration data.
+	 * <p>
+	 * This state is copy-on-write. It should always contain an immutable list
+	 * of the configuration keys/values.
 	 */
-	private Map<String, Object> byName;
+	private final AtomicReference<State> state;
+
+	private final Config baseConfig;
 
 	/**
-	 * Magic value indicating a missing entry
+	 * Magic value indicating a missing entry.
+	 * <p>
+	 * This value is tested for reference equality in some contexts, so we
+	 * must ensure it is a special copy of the empty string.  It also must
+	 * be treated like the empty string.
 	 */
-	private static final String MAGIC_EMPTY_VALUE = "%%magic%%empty%%";
+	private static final String MAGIC_EMPTY_VALUE = new String();
 
-	/**
-	 * The constructor for configuration file
-	 *
-	 * @param base
-	 *            the base configuration file to be consulted when value is
-	 *            missing from this file
-	 */
-	protected Config(Config base) {
-		baseConfig = base;
-		clear();
+	/** Create a configuration with no default fallback. */
+	public Config() {
+		this(null);
 	}
 
 	/**
-	 * Set file read indicator
+	 * Create an empty configuration with a fallback for missing keys.
 	 *
-	 * @param ok
-	 *            true if file does not need loading
+	 * @param defaultConfig
+	 *            the base configuration to be consulted when a key is missing
+	 *            from this configuration instance.
 	 */
-	protected void setFileRead(boolean ok) {
-		readFile = ok;
+	public Config(Config defaultConfig) {
+		baseConfig = defaultConfig;
+		state = new AtomicReference<State>(newState());
 	}
 
 	/**
@@ -106,7 +106,7 @@ public abstract class Config {
 	 *            the value to escape
 	 * @return the escaped value
 	 */
-	protected static String escapeValue(final String x) {
+	private static String escapeValue(final String x) {
 		boolean inquote = false;
 		int lineStart = 0;
 		final StringBuffer r = new StringBuffer(x.length());
@@ -229,15 +229,15 @@ public abstract class Config {
 			return defaultValue;
 
 		long mul = 1;
-		switch (Character.toLowerCase(n.charAt(n.length() - 1))) {
+		switch (StringUtils.toLowerCase(n.charAt(n.length() - 1))) {
 		case 'g':
-			mul = 1024 * 1024 * 1024;
+			mul = GiB;
 			break;
 		case 'm':
-			mul = 1024 * 1024;
+			mul = MiB;
 			break;
 		case 'k':
-			mul = 1024;
+			mul = KiB;
 			break;
 		}
 		if (mul > 1)
@@ -290,13 +290,16 @@ public abstract class Config {
 		if (n == null)
 			return defaultValue;
 
-		if (MAGIC_EMPTY_VALUE.equals(n) || "yes".equalsIgnoreCase(n)
-				|| "true".equalsIgnoreCase(n) || "1".equals(n)
-				|| "on".equalsIgnoreCase(n)) {
+		if (MAGIC_EMPTY_VALUE == n || StringUtils.equalsIgnoreCase("yes", n)
+				|| StringUtils.equalsIgnoreCase("true", n)
+				|| StringUtils.equalsIgnoreCase("1", n)
+				|| StringUtils.equalsIgnoreCase("on", n)) {
 			return true;
 
-		} else if ("no".equalsIgnoreCase(n) || "false".equalsIgnoreCase(n)
-				|| "0".equals(n) || "off".equalsIgnoreCase(n)) {
+		} else if (StringUtils.equalsIgnoreCase("no", n)
+				|| StringUtils.equalsIgnoreCase("false", n)
+				|| StringUtils.equalsIgnoreCase("0", n)
+				|| StringUtils.equalsIgnoreCase("off", n)) {
 			return false;
 
 		} else {
@@ -318,15 +321,14 @@ public abstract class Config {
 	 */
 	public String getString(final String section, String subsection,
 			final String name) {
-		String val = getRawString(section, subsection, name);
-		if (MAGIC_EMPTY_VALUE.equals(val)) {
-			return "";
-		}
-		return val;
+		return getRawString(section, subsection, name);
 	}
 
 	/**
 	 * Get a list of string values
+	 * <p>
+	 * If this instance was created with a base, the base's values are returned
+	 * first (if any).
 	 *
 	 * @param section
 	 *            the section
@@ -338,25 +340,22 @@ public abstract class Config {
 	 */
 	public String[] getStringList(final String section, String subsection,
 			final String name) {
-		final Object o = getRawEntry(section, subsection, name);
-		if (o instanceof List) {
-			final List lst = (List) o;
-			final String[] r = new String[lst.size()];
-			for (int i = 0; i < r.length; i++) {
-				final String val = ((Entry) lst.get(i)).value;
-				r[i] = MAGIC_EMPTY_VALUE.equals(val) ? "" : val;
-			}
-			return r;
-		}
-
-		if (o instanceof Entry) {
-			final String val = ((Entry) o).value;
-			return new String[] { MAGIC_EMPTY_VALUE.equals(val) ? "" : val };
-		}
-
+		final String[] baseList;
 		if (baseConfig != null)
-			return baseConfig.getStringList(section, subsection, name);
-		return new String[0];
+			baseList = baseConfig.getStringList(section, subsection, name);
+		else
+			baseList = EMPTY_STRING_ARRAY;
+
+		final List<String> lst = getRawStringList(section, subsection, name);
+		if (lst != null) {
+			final String[] res = new String[baseList.length + lst.size()];
+			int idx = baseList.length;
+			System.arraycopy(baseList, 0, res, 0, idx);
+			for (final String val : lst)
+				res[idx++] = val;
+			return res;
+		}
+		return baseList;
 	}
 
 	/**
@@ -367,67 +366,94 @@ public abstract class Config {
 	 *         subsection exists.
 	 */
 	public Set<String> getSubsections(final String section) {
-		final Set<String> result = new HashSet<String>();
-		ensureLoaded();
-
-		for (final Entry e : entries) {
-			if (section.equalsIgnoreCase(e.base) && e.extendedBase != null)
-				result.add(e.extendedBase);
-		}
-		if (baseConfig != null)
-			result.addAll(baseConfig.getSubsections(section));
-		return result;
+		return get(new SubsectionNames(section));
 	}
 
 	/**
-	 * Get a list of string values
+	 * Obtain a handle to a parsed set of configuration values.
 	 *
-	 * @param section
-	 *            the section
-	 * @param subsection
-	 *            the subsection for the value
-	 * @param name
-	 *            the key name
-	 * @return a raw string value as it is stored in configuration file
+	 * @param <T>
+	 *            type of configuration model to return.
+	 * @param parser
+	 *            parser which can create the model if it is not already
+	 *            available in this configuration file. The parser is also used
+	 *            as the key into a cache and must obey the hashCode and equals
+	 *            contract in order to reuse a parsed model.
+	 * @return the parsed object instance, which is cached inside this config.
 	 */
+	@SuppressWarnings("unchecked")
+	public <T> T get(final SectionParser<T> parser) {
+		final State myState = getState();
+		T obj = (T) myState.cache.get(parser);
+		if (obj == null) {
+			obj = parser.parse(this);
+			myState.cache.put(parser, obj);
+		}
+		return obj;
+	}
+
+	/**
+	 * Remove a cached configuration object.
+	 * <p>
+	 * If the associated configuration object has not yet been cached, this
+	 * method has no effect.
+	 *
+	 * @param parser
+	 *            parser used to obtain the configuration object.
+	 * @see #get(SectionParser)
+	 */
+	public void uncache(final SectionParser<?> parser) {
+		state.get().cache.remove(parser);
+	}
+
 	private String getRawString(final String section, final String subsection,
 			final String name) {
-		final Object o = getRawEntry(section, subsection, name);
-		if (o instanceof List) {
-			return ((Entry) ((List) o).get(0)).value;
-		} else if (o instanceof Entry) {
-			return ((Entry) o).value;
-		} else if (baseConfig != null)
+		final List<String> lst = getRawStringList(section, subsection, name);
+		if (lst != null)
+			return lst.get(0);
+		else if (baseConfig != null)
 			return baseConfig.getRawString(section, subsection, name);
 		else
 			return null;
 	}
 
-	private void ensureLoaded() {
-		if (!readFile) {
-			try {
-				load();
-			} catch (FileNotFoundException err) {
-				// Oh well. No sense in complaining about it.
-				//
-			} catch (IOException err) {
-				err.printStackTrace();
-			}
+	private List<String> getRawStringList(final String section,
+			final String subsection, final String name) {
+		List<String> r = null;
+		for (final Entry e : state.get().entryList) {
+			if (e.match(section, subsection, name))
+				r = add(r, e.value);
 		}
+		return r;
 	}
 
-	private Object getRawEntry(final String section, final String subsection,
-			final String name) {
-		ensureLoaded();
+	private static List<String> add(final List<String> curr, final String value) {
+		if (curr == null)
+			return Collections.singletonList(value);
+		if (curr.size() == 1) {
+			final List<String> r = new ArrayList<String>(2);
+			r.add(curr.get(0));
+			r.add(value);
+			return r;
+		}
+		curr.add(value);
+		return curr;
+	}
 
-		String ss;
-		if (subsection != null)
-			ss = "." + subsection.toLowerCase();
-		else
-			ss = "";
-		final Object o;
-		o = byName.get(section.toLowerCase() + ss + "." + name.toLowerCase());
-		return o;
+	private State getState() {
+		State cur, upd;
+		do {
+			cur = state.get();
+			final State base = getBaseState();
+			if (cur.baseState == base)
+				return cur;
+			upd = new State(cur.entryList, base);
+		} while (!state.compareAndSet(cur, upd));
+		return upd;
+	}
+
+	private State getBaseState() {
+		return baseConfig != null ? baseConfig.getState() : null;
 	}
 
 	/**
@@ -450,14 +476,37 @@ public abstract class Config {
 	 */
 	public void setInt(final String section, final String subsection,
 			final String name, final int value) {
+		setLong(section, subsection, name, value);
+	}
+
+	/**
+	 * Add or modify a configuration value. The parameters will result in a
+	 * configuration entry like this.
+	 *
+	 * <pre>
+	 * [section &quot;subsection&quot;]
+	 *         name = value
+	 * </pre>
+	 *
+	 * @param section
+	 *            section name, e.g "branch"
+	 * @param subsection
+	 *            optional subsection value, e.g. a branch name
+	 * @param name
+	 *            parameter name, e.g. "filemode"
+	 * @param value
+	 *            parameter value
+	 */
+	public void setLong(final String section, final String subsection,
+			final String name, final long value) {
 		final String s;
 
-		if ((value % (1024 * 1024 * 1024)) == 0)
-			s = String.valueOf(value / (1024 * 1024 * 1024)) + " g";
-		else if ((value % (1024 * 1024)) == 0)
-			s = String.valueOf(value / (1024 * 1024)) + " m";
-		else if ((value % 1024) == 0)
-			s = String.valueOf(value / 1024) + " k";
+		if (value >= GiB && (value % GiB) == 0)
+			s = String.valueOf(value / GiB) + " g";
+		else if (value >= MiB && (value % MiB) == 0)
+			s = String.valueOf(value / MiB) + " m";
+		else if (value >= KiB && (value % KiB) == 0)
+			s = String.valueOf(value / KiB) + " k";
 		else
 			s = String.valueOf(value);
 
@@ -521,7 +570,7 @@ public abstract class Config {
 	 * @param name
 	 *            parameter name, e.g. "filemode"
 	 */
-	public void unsetString(final String section, final String subsection,
+	public void unset(final String section, final String subsection,
 			final String name) {
 		setStringList(section, subsection, name, Collections
 				.<String> emptyList());
@@ -546,34 +595,17 @@ public abstract class Config {
 	 */
 	public void setStringList(final String section, final String subsection,
 			final String name, final List<String> values) {
-		// Update our parsed cache of values for future reference.
-		//
-		String key = section.toLowerCase();
-		if (subsection != null)
-			key += "." + subsection.toLowerCase();
-		key += "." + name.toLowerCase();
-		if (values.size() == 0)
-			byName.remove(key);
-		else if (values.size() == 1) {
-			final Entry e = new Entry();
-			e.base = section;
-			e.extendedBase = subsection;
-			e.name = name;
-			e.value = values.get(0);
-			byName.put(key, e);
-		} else {
-			final ArrayList<Entry> eList = new ArrayList<Entry>(values.size());
-			for (final String v : values) {
-				final Entry e = new Entry();
-				e.base = section;
-				e.extendedBase = subsection;
-				e.name = name;
-				e.value = v;
-				eList.add(e);
-			}
-			byName.put(key, eList);
-		}
+		State src, res;
+		do {
+			src = state.get();
+			res = replaceStringList(src, section, subsection, name, values);
+		} while (!state.compareAndSet(src, res));
+	}
 
+	private State replaceStringList(final State srcState,
+			final String section, final String subsection, final String name,
+			final List<String> values) {
+		final List<Entry> entries = copy(srcState, values);
 		int entryIndex = 0;
 		int valueIndex = 0;
 		int insertPosition = -1;
@@ -581,11 +613,12 @@ public abstract class Config {
 		// Reset the first n Entry objects that match this input name.
 		//
 		while (entryIndex < entries.size() && valueIndex < values.size()) {
-			final Entry e = entries.get(entryIndex++);
+			final Entry e = entries.get(entryIndex);
 			if (e.match(section, subsection, name)) {
-				e.value = values.get(valueIndex++);
-				insertPosition = entryIndex;
+				entries.set(entryIndex, e.forValue(values.get(valueIndex++)));
+				insertPosition = entryIndex + 1;
 			}
+			entryIndex++;
 		}
 
 		// Remove any extra Entry objects that we no longer need.
@@ -606,34 +639,43 @@ public abstract class Config {
 				// is already a section available that matches. Insert
 				// after the last key of that section.
 				//
-				insertPosition = findSectionEnd(section, subsection);
+				insertPosition = findSectionEnd(entries, section, subsection);
 			}
 			if (insertPosition < 0) {
 				// We didn't find any matching section header for this key,
 				// so we must create a new section header at the end.
 				//
 				final Entry e = new Entry();
-				e.prefix = null;
-				e.suffix = null;
-				e.base = section;
-				e.extendedBase = subsection;
+				e.section = section;
+				e.subsection = subsection;
 				entries.add(e);
 				insertPosition = entries.size();
 			}
 			while (valueIndex < values.size()) {
 				final Entry e = new Entry();
-				e.prefix = null;
-				e.suffix = null;
-				e.base = section;
-				e.extendedBase = subsection;
+				e.section = section;
+				e.subsection = subsection;
 				e.name = name;
 				e.value = values.get(valueIndex++);
 				entries.add(insertPosition++, e);
 			}
 		}
+
+		return newState(entries);
 	}
 
-	private int findSectionEnd(final String section, final String subsection) {
+	private static List<Entry> copy(final State src, final List<String> values) {
+		// At worst we need to insert 1 line for each value, plus 1 line
+		// for a new section header. Assume that and allocate the space.
+		//
+		final int max = src.entryList.size() + values.size() + 1;
+		final ArrayList<Entry> r = new ArrayList<Entry>(max);
+		r.addAll(src.entryList);
+		return r;
+	}
+
+	private static int findSectionEnd(final List<Entry> entries,
+			final String section, final String subsection) {
 		for (int i = 0; i < entries.size(); i++) {
 			Entry e = entries.get(i);
 			if (e.match(section, subsection, null)) {
@@ -652,291 +694,260 @@ public abstract class Config {
 	}
 
 	/**
-	 * Print configuration file to the PrintWriter
-	 *
-	 * @param r
-	 *             the print writer (it must use '\n' as new line separator).
+	 * @return this configuration, formatted as a Git style text file.
 	 */
-	protected void printConfig(final PrintWriter r) {
-		final Iterator<Entry> i = entries.iterator();
-		while (i.hasNext()) {
-			final Entry e = i.next();
-			if (e.prefix != null) {
-				r.print(e.prefix);
-			}
-			if (e.base != null && e.name == null) {
-				r.print('[');
-				r.print(e.base);
-				if (e.extendedBase != null) {
-					r.print(' ');
-					r.print('"');
-					r.print(escapeValue(e.extendedBase));
-					r.print('"');
+	public String toText() {
+		final StringBuilder out = new StringBuilder();
+		for (final Entry e : state.get().entryList) {
+			if (e.prefix != null)
+				out.append(e.prefix);
+			if (e.section != null && e.name == null) {
+				out.append('[');
+				out.append(e.section);
+				if (e.subsection != null) {
+					out.append(' ');
+					out.append('"');
+					out.append(escapeValue(e.subsection));
+					out.append('"');
 				}
-				r.print(']');
-			} else if (e.base != null && e.name != null) {
-				if (e.prefix == null || "".equals(e.prefix)) {
-					r.print('\t');
-				}
-				r.print(e.name);
+				out.append(']');
+			} else if (e.section != null && e.name != null) {
+				if (e.prefix == null || "".equals(e.prefix))
+					out.append('\t');
+				out.append(e.name);
 				if (e.value != null) {
-					if (!MAGIC_EMPTY_VALUE.equals(e.value)) {
-						r.print(" = ");
-						r.print(escapeValue(e.value));
+					if (MAGIC_EMPTY_VALUE != e.value) {
+						out.append(" = ");
+						out.append(escapeValue(e.value));
 					}
 				}
-				if (e.suffix != null) {
-					r.print(' ');
-				}
+				if (e.suffix != null)
+					out.append(' ');
 			}
-			if (e.suffix != null) {
-				r.print(e.suffix);
-			}
-			r.println();
+			if (e.suffix != null)
+				out.append(e.suffix);
+			out.append('\n');
 		}
+		return out.toString();
 	}
 
 	/**
-	 * Read the config file
+	 * Clear this configuration and reset to the contents of the parsed string.
 	 *
-	 * @throws IOException in case of IO error
+	 * @param text
+	 *            Git style text file listing configuration properties.
+	 * @throws ConfigInvalidException
+	 *             the text supplied is not formatted correctly. No changes were
+	 *             made to {@code this}.
 	 */
-	public void load() throws IOException {
-		clear();
-		readFile = true;
-		final BufferedReader r = new BufferedReader(new InputStreamReader(
-				openInputStream(), Constants.CHARSET));
-		try {
-			Entry last = null;
-			Entry e = new Entry();
-			for (;;) {
-				r.mark(1);
-				int input = r.read();
-				final char in = (char) input;
-				if (-1 == input) {
-					break;
-				} else if ('\n' == in) {
-					// End of this entry.
-					add(e);
-					if (e.base != null) {
-						last = e;
-					}
-					e = new Entry();
-				} else if (e.suffix != null) {
-					// Everything up until the end-of-line is in the suffix.
-					e.suffix += in;
-				} else if (';' == in || '#' == in) {
-					// The rest of this line is a comment; put into suffix.
-					e.suffix = String.valueOf(in);
-				} else if (e.base == null && Character.isWhitespace(in)) {
-					// Save the leading whitespace (if any).
-					if (e.prefix == null) {
-						e.prefix = "";
-					}
-					e.prefix += in;
-				} else if ('[' == in) {
-					// This is a group header line.
-					e.base = readBase(r);
-					input = r.read();
-					if ('"' == input) {
-						e.extendedBase = readValue(r, true, '"');
-						input = r.read();
-					}
-					if (']' != input) {
-						throw new IOException("Bad group header.");
-					}
-					e.suffix = "";
-				} else if (last != null) {
-					// Read a value.
-					e.base = last.base;
-					e.extendedBase = last.extendedBase;
-					r.reset();
-					e.name = readName(r);
-					if (e.name.endsWith("\n")) {
-						e.name = e.name.substring(0, e.name.length() - 1);
-						e.value = MAGIC_EMPTY_VALUE;
-					} else
-						e.value = readValue(r, false, -1);
-				} else {
-					throw new IOException("Invalid line in config file.");
+	public void fromText(final String text) throws ConfigInvalidException {
+		final List<Entry> newEntries = new ArrayList<Entry>();
+		final StringReader in = new StringReader(text);
+		Entry last = null;
+		Entry e = new Entry();
+		for (;;) {
+			int input = in.read();
+			if (-1 == input)
+				break;
+
+			final char c = (char) input;
+			if ('\n' == c) {
+				// End of this entry.
+				newEntries.add(e);
+				if (e.section != null)
+					last = e;
+				e = new Entry();
+
+			} else if (e.suffix != null) {
+				// Everything up until the end-of-line is in the suffix.
+				e.suffix += c;
+
+			} else if (';' == c || '#' == c) {
+				// The rest of this line is a comment; put into suffix.
+				e.suffix = String.valueOf(c);
+
+			} else if (e.section == null && Character.isWhitespace(c)) {
+				// Save the leading whitespace (if any).
+				if (e.prefix == null)
+					e.prefix = "";
+				e.prefix += c;
+
+			} else if ('[' == c) {
+				// This is a section header.
+				e.section = readSectionName(in);
+				input = in.read();
+				if ('"' == input) {
+					e.subsection = readValue(in, true, '"');
+					input = in.read();
 				}
-			}
-		} finally {
-			r.close();
+				if (']' != input)
+					throw new ConfigInvalidException("Bad group header");
+				e.suffix = "";
+
+			} else if (last != null) {
+				// Read a value.
+				e.section = last.section;
+				e.subsection = last.subsection;
+				in.reset();
+				e.name = readKeyName(in);
+				if (e.name.endsWith("\n")) {
+					e.name = e.name.substring(0, e.name.length() - 1);
+					e.value = MAGIC_EMPTY_VALUE;
+				} else
+					e.value = readValue(in, false, -1);
+
+			} else
+				throw new ConfigInvalidException("Invalid line in config file");
 		}
+
+		state.set(newState(newEntries));
 	}
 
-	/**
-	 * Open input stream for configuration file. It is used during the
-	 * {@link #load()} method.
-	 *
-	 * @return input stream for the configuration file.
-	 * @throws IOException
-	 *             if the stream cannot be created
-	 */
-	protected abstract InputStream openInputStream() throws IOException;
+	private State newState() {
+		return new State(Collections.<Entry> emptyList(), getBaseState());
+	}
+
+	private State newState(final List<Entry> entries) {
+		return new State(Collections.unmodifiableList(entries), getBaseState());
+	}
 
 	/**
 	 * Clear the configuration file
 	 */
 	protected void clear() {
-		entries = new ArrayList<Entry>();
-		byName = new HashMap<String, Object>();
+		state.set(newState());
 	}
 
-	@SuppressWarnings("unchecked")
-	private void add(final Entry e) {
-		entries.add(e);
-		if (e.base != null) {
-			final String b = e.base.toLowerCase();
-			final String group;
-			if (e.extendedBase != null) {
-				group = b + "." + e.extendedBase;
-			} else {
-				group = b;
-			}
-			if (e.name != null) {
-				final String n = e.name.toLowerCase();
-				final String key = group + "." + n;
-				final Object o = byName.get(key);
-				if (o == null) {
-					byName.put(key, e);
-				} else if (o instanceof Entry) {
-					final ArrayList<Object> l = new ArrayList<Object>();
-					l.add(o);
-					l.add(e);
-					byName.put(key, l);
-				} else if (o instanceof List) {
-					((List<Entry>) o).add(e);
-				}
-			}
-		}
-	}
-
-	private static String readBase(final BufferedReader r) throws IOException {
-		final StringBuffer base = new StringBuffer();
+	private static String readSectionName(final StringReader in)
+			throws ConfigInvalidException {
+		final StringBuilder name = new StringBuilder();
 		for (;;) {
-			r.mark(1);
-			int c = r.read();
-			if (c < 0) {
-				throw new IOException("Unexpected end of config file.");
-			} else if (']' == c) {
-				r.reset();
+			int c = in.read();
+			if (c < 0)
+				throw new ConfigInvalidException("Unexpected end of config file");
+
+			if (']' == c) {
+				in.reset();
 				break;
-			} else if (' ' == c || '\t' == c) {
+			}
+
+			if (' ' == c || '\t' == c) {
 				for (;;) {
-					r.mark(1);
-					c = r.read();
-					if (c < 0) {
-						throw new IOException("Unexpected end of config file.");
-					} else if ('"' == c) {
-						r.reset();
+					c = in.read();
+					if (c < 0)
+						throw new ConfigInvalidException("Unexpected end of config file");
+
+					if ('"' == c) {
+						in.reset();
 						break;
-					} else if (' ' == c || '\t' == c) {
-						// Skipped...
-					} else {
-						throw new IOException("Bad base entry. : " + base + ","
-								+ c);
 					}
+
+					if (' ' == c || '\t' == c)
+						continue; // Skipped...
+					throw new ConfigInvalidException("Bad section entry: " + name);
 				}
 				break;
-			} else if (Character.isLetterOrDigit((char) c) || '.' == c
-					|| '-' == c) {
-				base.append((char) c);
-			} else {
-				throw new IOException("Bad base entry. : " + base + ", " + c);
 			}
+
+			if (Character.isLetterOrDigit((char) c) || '.' == c || '-' == c)
+				name.append((char) c);
+			else
+				throw new ConfigInvalidException("Bad section entry: " + name);
 		}
-		return base.toString();
+		return name.toString();
 	}
 
-	private static String readName(final BufferedReader r) throws IOException {
+	private static String readKeyName(final StringReader in)
+			throws ConfigInvalidException {
 		final StringBuffer name = new StringBuffer();
 		for (;;) {
-			r.mark(1);
-			int c = r.read();
-			if (c < 0) {
-				throw new IOException("Unexpected end of config file.");
-			} else if ('=' == c) {
+			int c = in.read();
+			if (c < 0)
+				throw new ConfigInvalidException("Unexpected end of config file");
+
+			if ('=' == c)
 				break;
-			} else if (' ' == c || '\t' == c) {
+
+			if (' ' == c || '\t' == c) {
 				for (;;) {
-					r.mark(1);
-					c = r.read();
-					if (c < 0) {
-						throw new IOException("Unexpected end of config file.");
-					} else if ('=' == c) {
+					c = in.read();
+					if (c < 0)
+						throw new ConfigInvalidException("Unexpected end of config file");
+
+					if ('=' == c)
 						break;
-					} else if (';' == c || '#' == c || '\n' == c) {
-						r.reset();
+
+					if (';' == c || '#' == c || '\n' == c) {
+						in.reset();
 						break;
-					} else if (' ' == c || '\t' == c) {
-						// Skipped...
-					} else {
-						throw new IOException("Bad entry delimiter.");
 					}
+
+					if (' ' == c || '\t' == c)
+						continue; // Skipped...
+					throw new ConfigInvalidException("Bad entry delimiter");
 				}
 				break;
-			} else if (Character.isLetterOrDigit((char) c) || c == '-') {
+			}
+
+			if (Character.isLetterOrDigit((char) c) || c == '-') {
 				// From the git-config man page:
 				// The variable names are case-insensitive and only
 				// alphanumeric characters and - are allowed.
 				name.append((char) c);
 			} else if ('\n' == c) {
-				r.reset();
+				in.reset();
 				name.append((char) c);
 				break;
-			} else {
-				throw new IOException("Bad config entry name: " + name
-						+ (char) c);
-			}
+			} else
+				throw new ConfigInvalidException("Bad entry name: " + name);
 		}
 		return name.toString();
 	}
 
-	private static String readValue(final BufferedReader r, boolean quote,
-			final int eol) throws IOException {
+	private static String readValue(final StringReader in, boolean quote,
+			final int eol) throws ConfigInvalidException {
 		final StringBuffer value = new StringBuffer();
 		boolean space = false;
 		for (;;) {
-			r.mark(1);
-			int c = r.read();
+			int c = in.read();
 			if (c < 0) {
 				if (value.length() == 0)
-					throw new IOException("Unexpected end of config file.");
+					throw new ConfigInvalidException("Unexpected end of config file");
 				break;
 			}
+
 			if ('\n' == c) {
-				if (quote) {
-					throw new IOException("Newline in quotes not allowed.");
-				}
-				r.reset();
+				if (quote)
+					throw new ConfigInvalidException("Newline in quotes not allowed");
+				in.reset();
 				break;
 			}
-			if (eol == c) {
+
+			if (eol == c)
 				break;
-			}
+
 			if (!quote) {
 				if (Character.isWhitespace((char) c)) {
 					space = true;
 					continue;
 				}
 				if (';' == c || '#' == c) {
-					r.reset();
+					in.reset();
 					break;
 				}
 			}
+
 			if (space) {
-				if (value.length() > 0) {
+				if (value.length() > 0)
 					value.append(' ');
-				}
 				space = false;
 			}
+
 			if ('\\' == c) {
-				c = r.read();
+				c = in.read();
 				switch (c) {
 				case -1:
-					throw new IOException("End of file in escape.");
+					throw new ConfigInvalidException("End of file in escape");
 				case '\n':
 					continue;
 				case 't':
@@ -955,16 +966,89 @@ public abstract class Config {
 					value.append('"');
 					continue;
 				default:
-					throw new IOException("Bad escape: " + ((char) c));
+					throw new ConfigInvalidException("Bad escape: " + ((char) c));
 				}
 			}
+
 			if ('"' == c) {
 				quote = !quote;
 				continue;
 			}
+
 			value.append((char) c);
 		}
 		return value.length() > 0 ? value.toString() : null;
+	}
+
+	/**
+	 * Parses a section of the configuration into an application model object.
+	 * <p>
+	 * Instances must implement hashCode and equals such that model objects can
+	 * be cached by using the {@code SectionParser} as a key of a HashMap.
+	 * <p>
+	 * As the {@code SectionParser} itself is used as the key of the internal
+	 * HashMap applications should be careful to ensure the SectionParser key
+	 * does not retain unnecessary application state which may cause memory to
+	 * be held longer than expected.
+	 *
+	 * @param <T>
+	 *            type of the application model created by the parser.
+	 */
+	public static interface SectionParser<T> {
+		/**
+		 * Create a model object from a configuration.
+		 *
+		 * @param cfg
+		 *            the configuration to read values from.
+		 * @return the application model instance.
+		 */
+		T parse(Config cfg);
+	}
+
+	private static class SubsectionNames implements SectionParser<Set<String>> {
+		private final String section;
+
+		SubsectionNames(final String sectionName) {
+			section = sectionName;
+		}
+
+		public int hashCode() {
+			return section.hashCode();
+		}
+
+		public boolean equals(Object other) {
+			if (other instanceof SubsectionNames) {
+				return section.equals(((SubsectionNames) other).section);
+			}
+			return false;
+		}
+
+		public Set<String> parse(Config cfg) {
+			final Set<String> result = new HashSet<String>();
+			while (cfg != null) {
+				for (final Entry e : cfg.state.get().entryList) {
+					if (e.subsection != null && e.name == null
+							&& StringUtils.equalsIgnoreCase(section, e.section))
+						result.add(e.subsection);
+				}
+				cfg = cfg.baseConfig;
+			}
+			return Collections.unmodifiableSet(result);
+		}
+	}
+
+	private static class State {
+		final List<Entry> entryList;
+
+		final Map<Object, Object> cache;
+
+		final State baseState;
+
+		State(List<Entry> entries, State base) {
+			entryList = entries;
+			cache = new ConcurrentHashMap<Object, Object>(16, 0.75f, 1);
+			baseState = base;
+		}
 	}
 
 	/**
@@ -979,12 +1063,12 @@ public abstract class Config {
 		/**
 		 * The section name for the entry
 		 */
-		String base;
+		String section;
 
 		/**
 		 * Subsection name
 		 */
-		String extendedBase;
+		String subsection;
 
 		/**
 		 * The key name
@@ -1001,19 +1085,61 @@ public abstract class Config {
 		 */
 		String suffix;
 
-		boolean match(final String aBase, final String aExtendedBase,
-				final String aName) {
-			return eq(base, aBase) && eq(extendedBase, aExtendedBase)
-					&& eq(name, aName);
+		Entry forValue(final String newValue) {
+			final Entry e = new Entry();
+			e.prefix = prefix;
+			e.section = section;
+			e.subsection = subsection;
+			e.name = name;
+			e.value = newValue;
+			e.suffix = suffix;
+			return e;
 		}
 
-		private static boolean eq(final String a, final String b) {
+		boolean match(final String aSection, final String aSubsection,
+				final String aKey) {
+			return eqIgnoreCase(section, aSection)
+					&& eqSameCase(subsection, aSubsection)
+					&& eqIgnoreCase(name, aKey);
+		}
+
+		private static boolean eqIgnoreCase(final String a, final String b) {
 			if (a == null && b == null)
 				return true;
 			if (a == null || b == null)
 				return false;
-			return a.equalsIgnoreCase(b);
+			return StringUtils.equalsIgnoreCase(a, b);
+		}
+
+		private static boolean eqSameCase(final String a, final String b) {
+			if (a == null && b == null)
+				return true;
+			if (a == null || b == null)
+				return false;
+			return a.equals(b);
 		}
 	}
 
+	private static class StringReader {
+		private final char[] buf;
+
+		private int pos;
+
+		StringReader(final String in) {
+			buf = in.toCharArray();
+		}
+
+		int read() {
+			try {
+				return buf[pos++];
+			} catch (ArrayIndexOutOfBoundsException e) {
+				pos = buf.length;
+				return -1;
+			}
+		}
+
+		void reset() {
+			pos--;
+		}
+	}
 }
