@@ -205,11 +205,6 @@ public class IgnoreRules {
 
 		boolean matchResult = true;
 		
-		// empty line
-		if (pattern.length() == 0) {
-			return false;
-		}
-		
 		// comment
 		if (pattern.startsWith("#")) {
 			return false;
@@ -222,23 +217,39 @@ public class IgnoreRules {
 			// cut off the '!'
 			pattern = pattern.substring(1);
 		}
-		
+
+		// empty line
+		if (pattern.length() == 0) {
+			return false;
+		}
+
 		// check for absolute paths
 		//X TODO this currently doesn't support wildcards!
-		if (pattern.startsWith("/") && pattern.length() > 1) {
-			if (toCheckFor.equals(new File(currentDir, pattern.substring(1)))) {
-				return matchResult;
-			}
-		} else {
+		if (!pattern.startsWith(File.separator) ) {
+			pattern = "*" + File.separator + pattern;
+		} 
+
+		String repoPath = toCheckFor.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
+		if (wildCardEquals(repoPath, pattern)) {
+			return matchResult;
+		}
+
+/*X
 			String repoPath = toCheckFor.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
 			if (repoPath.contains(File.separator + pattern + File.separator) || toCheckFor.getName().equals(pattern)) {
 				return matchResult;
 			}
-		}
-	
+*/			
 		
 		//X TODO there are  possibly still a few matching rules missing!
 		return false;
+	}
+
+	private boolean wildCardEquals(String filePathToCheckFor, String pattern) {
+		pattern = pattern.replace("*", ".*") + "/.*";
+		filePathToCheckFor = filePathToCheckFor + "/";
+		boolean equals = filePathToCheckFor.matches(pattern);
+		return equals;
 	}
 	
 }
