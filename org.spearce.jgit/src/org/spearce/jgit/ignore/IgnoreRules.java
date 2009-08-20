@@ -223,32 +223,32 @@ public class IgnoreRules {
 			return false;
 		}
 
-		// check for absolute paths
-		//X TODO this currently doesn't support wildcards!
 		if (!pattern.startsWith(File.separator) ) {
 			pattern = "*" + File.separator + pattern;
 		} 
 
 		String repoPath = toCheckFor.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
-		if (wildCardEquals(repoPath, pattern)) {
+		if (wildCardMatch(repoPath, pattern)) {
 			return matchResult;
 		}
 
-/*X
-			String repoPath = toCheckFor.getAbsolutePath().substring(db.getWorkDir().getAbsolutePath().length());
-			if (repoPath.contains(File.separator + pattern + File.separator) || toCheckFor.getName().equals(pattern)) {
-				return matchResult;
-			}
-*/			
-		
 		//X TODO there are  possibly still a few matching rules missing!
 		return false;
 	}
 
-	private boolean wildCardEquals(String filePathToCheckFor, String pattern) {
-		pattern = pattern.replace("*", ".*") + "/.*";
-		filePathToCheckFor = filePathToCheckFor + "/";
-		boolean equals = filePathToCheckFor.matches(pattern);
+	/**
+	 * Check if the given file path matches the pattern. The pattern may contain * wildcards.
+	 * @param filePathToCheckFor the repository-absolute path for the file or directory we should check
+	 * @param pattern the search pattern from the ignore configuration
+	 * @return <code>true</code> if the file matches the ignore pattern
+	 */
+	private boolean wildCardMatch(final String filePathToCheckFor, final String pattern) {
+		String p = pattern.replace(".", "\\."); // escape all dots, since a . matches all chars in regexp
+		p = p.replace("*", ".*");  // escape a star with 'n chars' regexp 
+		p += "/.*"; // add a delimiter, so paths may be matched correctly. /myPath/ != /myPathOther/
+		
+		String delimitedPath = filePathToCheckFor + "/";
+		boolean equals = delimitedPath.matches(p);
 		return equals;
 	}
 	

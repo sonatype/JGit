@@ -86,8 +86,12 @@ public class IgnoreRulesTest extends RepositoryTestCase {
 		IgnoreRules i = new IgnoreRules(db);
 		
 		assertTrue(i.isIgnored(new File(trash, "a/a1.txt")));
-		
+				
 		assertFalse(i.isIgnored(new File(trash, "b/b1.txt")));
+
+		assertTrue(i.isIgnored(new File(trash, "b/b2.txt")));
+		
+		assertFalse(i.isIgnored(new File(trash, "b/b2Xtxt")));
 	}
 
 
