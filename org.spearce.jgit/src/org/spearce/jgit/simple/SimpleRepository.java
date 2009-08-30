@@ -189,6 +189,9 @@ public class SimpleRepository {
 
 		repo.addRemote(remoteName, uri, branchName, tagName, true, null);
 		Ref head = repo.fetch(remoteName, monitor);
+		if (head == null) {
+			throw new TransportException("cannot guess HEAD");
+		}
 		repo.checkout(head.getObjectId(), head.getName());
 		return repo;
 	}
