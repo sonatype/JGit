@@ -36,50 +36,74 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.lib;
+package org.spearce.jgit.tck.lib;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
 
-import junit.textui.TestRunner;
+import junit.framework.TestCase;
 
-public class T0005_ShallowSpeedTest extends SpeedTestBase {
+/**
+ * Base class for performance unit test.
+ */
+public abstract class SpeedTestBase extends TestCase {
 
-	protected void setUp() throws Exception {
-		prepare(new String[] { "git", "rev-list", "365bbe0d0caaf2ba74d56556827babf0bc66965d" });
-	}
+	/**
+	 * The time used by native git as this is our reference.
+	 */
+	protected long nativeTime;
 
-	public void testShallowHistoryScan() throws IOException {
-		long start = System.currentTimeMillis();
-		Repository db = new Repository(new File(kernelrepo));
-		Commit commit = db.mapCommit("365bbe0d0caaf2ba74d56556827babf0bc66965d");
-		int n = 1;
-		for (;;) {
-			ObjectId[] parents = commit.getParentIds();
-			if (parents.length == 0)
-				break;
-			ObjectId parentId = parents[0];
-			commit = db.mapCommit(parentId);
-			commit.getCommitId().name();
-			++n;
+	/**
+	 * Reference to the location of the Linux kernel repo.
+	 */
+	protected String kernelrepo;
+
+	/**
+	 * Prepare test by running a test against the Linux kernel repo first.
+	 *
+	 * @param refcmd
+	 *            git command to execute
+	 *
+	 * @throws Exception
+	 */
+	protected void prepare(String[] refcmd) throws Exception {
+		try {
+			BufferedReader bufferedReader = new BufferedReader(new FileReader("kernel.ref"));
+			try {
+				kernelrepo = bufferedReader.readLine();
+			} finally {
+				bufferedReader.close();
+			}
+			timeNativeGit(kernelrepo, refcmd);
+			nativeTime = timeNativeGit(kernelrepo, refcmd);
+		} catch (Exception e) {
+			System.out.println("Create a file named kernel.ref and put the path to the Linux kernels repository there");
+			throw e;
 		}
-		assertEquals(12275, n);
-		long stop = System.currentTimeMillis();
-		long time = stop - start;
-		System.out.println("native="+nativeTime);
-		System.out.println("jgit="+time);
-		// ~0.750s (hot cache), ok
-		/*
-native=1795
-jgit=722
-		 */
-		// native git seems to run SLOWER than jgit here, at roughly half the speed
-		// creating the git process is not the issue here, btw.
-		long factor10 = (nativeTime*150/time+50)/100;
-		assertEquals(3, factor10);
 	}
 
-	public static void main(String[] args) {
-		TestRunner.run(T0005_ShallowSpeedTest.class);
+	private static long timeNativeGit(String kernelrepo, String[] refcmd) throws IOException,
+			InterruptedException, Exception {
+		long start = System.currentTimeMillis();
+		Process p = Runtime.getRuntime().exec(refcmd, null, new File(kernelrepo,".."));
+		InputStream inputStream = p.getInputStream();
+		InputStream errorStream = p.getErrorStream();
+		byte[] buf=new byte[1024*1024];
+		for (;;)
+			if (inputStream.read(buf) < 0)
+				break;
+		if (p.waitFor()!=0) {
+			int c;
+			while ((c=errorStream.read())!=-1)
+				System.err.print((char)c);
+			throw new Exception("git log failed");
+		}
+		inputStream.close();
+		errorStream.close();
+		long stop = System.currentTimeMillis();
+		return stop - start;
 	}
 }

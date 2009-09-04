@@ -36,20 +36,24 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.lib;
+package org.spearce.jgit.tck.lib;
 
 import java.io.File;
 import java.io.IOException;
 
+import org.spearce.jgit.lib.Commit;
+import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.Repository;
+
 import junit.textui.TestRunner;
 
-public class T0006_DeepSpeedTest extends SpeedTestBase {
+public class T0005_ShallowSpeedTckTest extends SpeedTestBase {
 
 	protected void setUp() throws Exception {
-		prepare(new String[] { "git", "rev-list", "365bbe0d0caaf2ba74d56556827babf0bc66965d","--","net/netfilter/nf_queue.c" });
+		prepare(new String[] { "git", "rev-list", "365bbe0d0caaf2ba74d56556827babf0bc66965d" });
 	}
 
-	public void testDeepHistoryScan() throws IOException {
+	public void testShallowHistoryScan() throws IOException {
 		long start = System.currentTimeMillis();
 		Repository db = new Repository(new File(kernelrepo));
 		Commit commit = db.mapCommit("365bbe0d0caaf2ba74d56556827babf0bc66965d");
@@ -60,29 +64,26 @@ public class T0006_DeepSpeedTest extends SpeedTestBase {
 				break;
 			ObjectId parentId = parents[0];
 			commit = db.mapCommit(parentId);
-			TreeEntry m = commit.getTree().findBlobMember("net/netfilter/nf_queue.c");
-			if (m != null)
-				commit.getCommitId().name();
+			commit.getCommitId().name();
 			++n;
 		}
-
 		assertEquals(12275, n);
 		long stop = System.currentTimeMillis();
 		long time = stop - start;
 		System.out.println("native="+nativeTime);
 		System.out.println("jgit="+time);
+		// ~0.750s (hot cache), ok
 		/*
-		native=1355
-		jgit=5449
+native=1795
+jgit=722
 		 */
-		// This is not an exact factor, but we'd expect native git to perform this
-		// about 4 times quicker. If for some reason we find jgit to be faster than
-		// this the cause should be found and secured.
-		long factor = (time*110/nativeTime+50)/100;
-		assertEquals(4, factor);
+		// native git seems to run SLOWER than jgit here, at roughly half the speed
+		// creating the git process is not the issue here, btw.
+		long factor10 = (nativeTime*150/time+50)/100;
+		assertEquals(3, factor10);
 	}
 
 	public static void main(String[] args) {
-		TestRunner.run(T0006_DeepSpeedTest.class);
+		TestRunner.run(T0005_ShallowSpeedTckTest.class);
 	}
 }

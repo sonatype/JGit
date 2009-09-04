@@ -35,7 +35,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.patch;
+package org.spearce.jgit.tck.patch;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -47,11 +47,15 @@ import java.util.HashSet;
 import junit.framework.TestCase;
 
 import org.spearce.jgit.lib.Constants;
+import org.spearce.jgit.patch.FileHeader;
+import org.spearce.jgit.patch.FormatError;
+import org.spearce.jgit.patch.HunkHeader;
+import org.spearce.jgit.patch.Patch;
 import org.spearce.jgit.util.MutableInteger;
 import org.spearce.jgit.util.RawParseUtils;
 import org.spearce.jgit.util.TemporaryBuffer;
 
-public class EGitPatchHistoryTest extends TestCase {
+public class EGitPatchHistoryTckTest extends TestCase {
 	public void testParseHistory() throws Exception {
 		final NumStatReader numstat = new NumStatReader();
 		numstat.read();

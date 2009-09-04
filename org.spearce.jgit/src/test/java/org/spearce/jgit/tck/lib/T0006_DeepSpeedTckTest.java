@@ -36,74 +36,58 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-package org.spearce.jgit.lib;
+package org.spearce.jgit.tck.lib;
 
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
 
-import junit.framework.TestCase;
+import org.spearce.jgit.lib.Commit;
+import org.spearce.jgit.lib.ObjectId;
+import org.spearce.jgit.lib.Repository;
+import org.spearce.jgit.lib.TreeEntry;
 
-/**
- * Base class for performance unit test.
- */
-public abstract class SpeedTestBase extends TestCase {
+import junit.textui.TestRunner;
 
-	/**
-	 * The time used by native git as this is our reference.
-	 */
-	protected long nativeTime;
+public class T0006_DeepSpeedTckTest extends SpeedTestBase {
 
-	/**
-	 * Reference to the location of the Linux kernel repo.
-	 */
-	protected String kernelrepo;
-
-	/**
-	 * Prepare test by running a test against the Linux kernel repo first.
-	 *
-	 * @param refcmd
-	 *            git command to execute
-	 *
-	 * @throws Exception
-	 */
-	protected void prepare(String[] refcmd) throws Exception {
-		try {
-			BufferedReader bufferedReader = new BufferedReader(new FileReader("kernel.ref"));
-			try {
-				kernelrepo = bufferedReader.readLine();
-			} finally {
-				bufferedReader.close();
-			}
-			timeNativeGit(kernelrepo, refcmd);
-			nativeTime = timeNativeGit(kernelrepo, refcmd);
-		} catch (Exception e) {
-			System.out.println("Create a file named kernel.ref and put the path to the Linux kernels repository there");
-			throw e;
-		}
+	protected void setUp() throws Exception {
+		prepare(new String[] { "git", "rev-list", "365bbe0d0caaf2ba74d56556827babf0bc66965d","--","net/netfilter/nf_queue.c" });
 	}
 
-	private static long timeNativeGit(String kernelrepo, String[] refcmd) throws IOException,
-			InterruptedException, Exception {
+	public void testDeepHistoryScan() throws IOException {
 		long start = System.currentTimeMillis();
-		Process p = Runtime.getRuntime().exec(refcmd, null, new File(kernelrepo,".."));
-		InputStream inputStream = p.getInputStream();
-		InputStream errorStream = p.getErrorStream();
-		byte[] buf=new byte[1024*1024];
-		for (;;)
-			if (inputStream.read(buf) < 0)
+		Repository db = new Repository(new File(kernelrepo));
+		Commit commit = db.mapCommit("365bbe0d0caaf2ba74d56556827babf0bc66965d");
+		int n = 1;
+		for (;;) {
+			ObjectId[] parents = commit.getParentIds();
+			if (parents.length == 0)
 				break;
-		if (p.waitFor()!=0) {
-			int c;
-			while ((c=errorStream.read())!=-1)
-				System.err.print((char)c);
-			throw new Exception("git log failed");
+			ObjectId parentId = parents[0];
+			commit = db.mapCommit(parentId);
+			TreeEntry m = commit.getTree().findBlobMember("net/netfilter/nf_queue.c");
+			if (m != null)
+				commit.getCommitId().name();
+			++n;
 		}
-		inputStream.close();
-		errorStream.close();
+
+		assertEquals(12275, n);
 		long stop = System.currentTimeMillis();
-		return stop - start;
+		long time = stop - start;
+		System.out.println("native="+nativeTime);
+		System.out.println("jgit="+time);
+		/*
+		native=1355
+		jgit=5449
+		 */
+		// This is not an exact factor, but we'd expect native git to perform this
+		// about 4 times quicker. If for some reason we find jgit to be faster than
+		// this the cause should be found and secured.
+		long factor = (time*110/nativeTime+50)/100;
+		assertEquals(4, factor);
+	}
+
+	public static void main(String[] args) {
+		TestRunner.run(T0006_DeepSpeedTckTest.class);
 	}
 }

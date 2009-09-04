@@ -69,7 +69,7 @@ import org.spearce.jgit.util.SystemReader;
  */
 public abstract class RepositoryTestCase extends TestCase {
 
-	protected final File trashParent = new File("trash");
+	protected final File trashParent = new File("target/trash");
 
 	protected File trash;
 
