@@ -7,10 +7,9 @@ then
 	cp=$this_script
 else
 	jgit_home=`dirname $0`
-	cp="$jgit_home/org.spearce.jgit/bin"
-	cp="$cp:$jgit_home/org.spearce.jgit/lib/jsch-0.1.37.jar"
-	cp="$cp:$jgit_home/org.spearce.jgit.pgm/bin"
-	cp="$cp:$jgit_home/org.spearce.jgit.pgm/lib/args4j-2.0.9.jar"
+	cp="$jgit_home/../org.spearce.jgit/target/classes"
+	cp="$cp:$jgit_home/../org.spearce.jgit.pgm/target/classes"
+	cp="$cp:$jgit_home/target/jgit-cli.jar"
 	unset jgit_home
 	java_args=
 fi

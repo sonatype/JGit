@@ -1,7 +1,13 @@
 JGIT Java native GIT core library
 
-see LICENSE for mor information
+see LICENSE for more information on JGIT.
 
-This product uses the library jsch-0.1.38.jar as binary, 
-home page of the project is http://www.jcraft.com/jsch/ 
+
+This product uses the library jsch-0.1.38.jar as binary. 
+The home page of the project is http://www.jcraft.com/jsch/ 
+See licenses/JSch.LICENSE.txt for more information.
+
+This product uses the library args4j-2.0.9.jar as binary, 
+The home page of the project is https://args4j.dev.java.net/
+See licenses/args4j.LICENSE.txt for more information.
 
