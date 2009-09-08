@@ -50,7 +50,7 @@ import org.spearce.jgit.lib.ObjectWriter;
 import org.spearce.jgit.lib.RepositoryTestCase;
 import org.spearce.jgit.treewalk.TreeWalk;
 
-public class PathSuffixFilterTestCase extends RepositoryTestCase {
+public class PathSuffixFilterTest extends RepositoryTestCase {
 
 	public void testNonRecursiveFiltering() throws IOException {
 		final ObjectWriter ow = new ObjectWriter(db);
