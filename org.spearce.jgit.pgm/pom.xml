@@ -102,11 +102,17 @@
 						<phase>package</phase>
 						<configuration>
 							<tasks>
-								<concat destfile="${basedir}/jgit" force="no">
-									<fileset file="${basedir}/jgit.sh" />
+								<copy todir="${basedir}/target/">
+									<fileset file="${basedir}/jgit.sh"/>
+									<filterset>
+										<filter token="use_self" value="1"/>
+									</filterset>
+								</copy>
+								<concat destfile="${basedir}/target/jgit" force="yes" binary="true">
+									<fileset file="${basedir}/target/jgit.sh" />
 									<fileset file="${basedir}/target/jgit-cli.jar" />
 								</concat>
-								<chmod file="${basedir}/jgit" perm="a+x"/>
+								<chmod file="${basedir}/target/jgit" perm="a+x"/>
 							</tasks>
 						</configuration>
 						<goals>

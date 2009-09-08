@@ -1,6 +1,6 @@
 #!/bin/sh
 
-if [ "@@use_self@@" = "1" ]
+if [ "@use_self@" = "1" ]
 then
 	this_script=`which "$0" 2>/dev/null`
 	[ $? -gt 0 -a -f "$0" ] && this_script="$0"
