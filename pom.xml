@@ -65,6 +65,12 @@
 	   <system>google-issue</system>
 	</issueManagement>
 	
+	<scm>
+		<connection>scm:git:git://repo.or.cz/jgit</connection>
+		<developerConnection>scm:git:git://repo.or.cz/jgit</developerConnection>
+		<url>http://repo.or.cz/r/jgit.git</url>
+	</scm>
+	
 	<developers>
 		<developer>
 			<name>Shawn O. Pearce</name>
