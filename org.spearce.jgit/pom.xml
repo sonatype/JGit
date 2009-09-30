@@ -107,6 +107,10 @@
 						<groupId>org.apache.maven.plugins</groupId>
 						<artifactId>maven-surefire-plugin</artifactId>
 						<configuration>
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/T00*.java</include>
+                            </includes>
 							<excludes>
 								<exclude>**/*TckTest.java</exclude>
 							</excludes>
@@ -125,6 +129,7 @@
 						<configuration>
 							<includes>
 								<include>**/*Test.java</include>
+                                <include>**/T00*.java</include>
 							</includes>
 						</configuration>
 					</plugin>
