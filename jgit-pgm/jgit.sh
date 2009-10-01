@@ -7,8 +7,8 @@ then
 	cp=$this_script
 else
 	jgit_home=`dirname $0`
-	cp="$jgit_home/../org.spearce.jgit/target/classes"
-	cp="$cp:$jgit_home/../org.spearce.jgit.pgm/target/classes"
+	cp="$jgit_home/../jgit-core/target/classes"
+	cp="$cp:$jgit_home/../jgit-pgm/target/classes"
 	cp="$cp:$jgit_home/target/jgit-cli.jar"
 	unset jgit_home
 	java_args=
@@ -47,5 +47,5 @@ then
 	java="$JAVA_HOME/bin/java"
 fi
 
-exec "$java" $java_args org.spearce.jgit.pgm.Main "$@"
+exec "$java" $java_args org.eclipse.jgit.pgm.Main "$@"
 exit 1
