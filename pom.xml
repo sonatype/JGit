@@ -71,8 +71,8 @@
 		<developerConnection>scm:git:git://repo.or.cz/jgit</developerConnection>
         <url>http://repo.or.cz/r/jgit.git</url>
      -->
-        <connection>scm:git:git://git@github.com:sonatype/JGit.git</connection>
-        <developerConnection>scm:git:git://git@github.com:sonatype/JGit.git</developerConnection>
+        <connection>scm:git:git@github.com:sonatype/JGit.git</connection>
+        <developerConnection>scm:git:git@github.com:sonatype/JGit.git</developerConnection>
 		<url>http://github.com/sonatype/JGit</url>
 	</scm>
 	
@@ -180,6 +180,11 @@
 					<encoding>UTF-8</encoding>
 				</configuration>
 			</plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>2.0-beta-10-MSX-temp</version>
+            </plugin>
 		</plugins>
 	</build>
 	<dependencies>
@@ -214,15 +219,15 @@
 	<distributionManagement>
         <site>
             <id>people.struberg.site</id>
-            <url>ssh://people.apache.org:/home/struberg/public_html/staging-site</url>
+            <url>scp://people.apache.org:/home/struberg/public_html/staging-site</url>
         </site>
         <repository>
             <id>people.struberg.repo</id>
-            <url>ssh://people.apache.org:/home/struberg/public_html/staging-repo</url>
+            <url>scp://people.apache.org:/home/struberg/public_html/staging-repo</url>
         </repository>
         <snapshotRepository>
             <id>people.struberg.repo</id>
-            <url>ssh://people.apache.org:/home/struberg/public_html/snapshot-repo</url>
+            <url>scp://people.apache.org:/home/struberg/public_html/snapshot-repo</url>
             <uniqueVersion>true</uniqueVersion>
         </snapshotRepository>
  <!-- 
