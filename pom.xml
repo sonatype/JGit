@@ -66,9 +66,14 @@
 	</issueManagement>
 	
 	<scm>
+	<!-- original location
 		<connection>scm:git:git://repo.or.cz/jgit</connection>
 		<developerConnection>scm:git:git://repo.or.cz/jgit</developerConnection>
-		<url>http://repo.or.cz/r/jgit.git</url>
+        <url>http://repo.or.cz/r/jgit.git</url>
+     -->
+        <connection>scm:git:git://git@github.com:sonatype/JGit.git</connection>
+        <developerConnection>scm:git:git://git@github.com:sonatype/JGit.git</developerConnection>
+		<url>http://github.com/sonatype/JGit</url>
 	</scm>
 	
 	<developers>
@@ -93,7 +98,9 @@
 				<role>Developer</role>
 			</roles>
 		</developer>
-		<developer>
+		<developer>            <id>people.struberg.repo</id>
+            <url>ssh://people.apache.org:/home/struberg/public_html/staging-repo</url>
+		
 			<name>Roger C. Soares</name>
 			<email>rogersoares@intelinet.com.br</email>
 			<roles>
@@ -205,12 +212,27 @@
 	</dependencyManagement>
 	
 	<distributionManagement>
+        <site>
+            <id>people.struberg.site</id>
+            <url>ssh://people.apache.org:/home/struberg/public_html/staging-site</url>
+        </site>
+        <repository>
+            <id>people.struberg.repo</id>
+            <url>ssh://people.apache.org:/home/struberg/public_html/staging-repo</url>
+        </repository>
+        <snapshotRepository>
+            <id>people.struberg.repo</id>
+            <url>ssh://people.apache.org:/home/struberg/public_html/snapshot-repo</url>
+            <uniqueVersion>true</uniqueVersion>
+        </snapshotRepository>
+ <!-- 
 		<snapshotRepository>
 			<id>jgit-maven-snapshot-repository</id>
 			<name>JGit Maven Snapshot Repository</name>
 			<url>dav:https://egit.googlecode.com/svn/maven/snapshot-repository/</url>
 			<uniqueVersion>true</uniqueVersion>
 		</snapshotRepository>
+ -->	
 	</distributionManagement>
 	
 	<modules>
