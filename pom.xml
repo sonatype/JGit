@@ -71,8 +71,8 @@
 		<developerConnection>scm:git:git://repo.or.cz/jgit</developerConnection>
         <url>http://repo.or.cz/r/jgit.git</url>
      -->
-        <connection>scm:git:git://git@github.com:sonatype/JGit.git</connection>
-        <developerConnection>scm:git:git://git@github.com:sonatype/JGit.git</developerConnection>
+        <connection>scm:git:ssh://git@github.com/sonatype/JGit.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/sonatype/JGit.git</developerConnection>
 		<url>http://github.com/sonatype/JGit</url>
 	</scm>
 	
