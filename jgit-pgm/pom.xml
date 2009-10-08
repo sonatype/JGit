@@ -36,14 +36,13 @@
  */
 -->
 
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 
 	<parent>
 		<groupId>org.eclipse.jgit</groupId>
 		<artifactId>parent</artifactId>
-		<version>0.5.0-SNAPSHOT</version>
+		<version>0.5.0</version>
 	</parent>
 
 	<artifactId>jgit-pgm</artifactId>
@@ -103,16 +102,16 @@
 						<configuration>
 							<tasks>
 								<copy todir="${basedir}/target/">
-									<fileset file="${basedir}/jgit.sh"/>
+									<fileset file="${basedir}/jgit.sh" />
 									<filterset>
-										<filter token="use_self" value="1"/>
+										<filter token="use_self" value="1" />
 									</filterset>
 								</copy>
 								<concat destfile="${basedir}/target/jgit" force="yes" binary="true">
 									<fileset file="${basedir}/target/jgit.sh" />
 									<fileset file="${basedir}/target/jgit-cli.jar" />
 								</concat>
-								<chmod file="${basedir}/target/jgit" perm="a+x"/>
+								<chmod file="${basedir}/target/jgit" perm="a+x" />
 							</tasks>
 						</configuration>
 						<goals>
