@@ -42,7 +42,7 @@
 	<groupId>org.eclipse.jgit</groupId>
 	<artifactId>parent</artifactId>
 	<packaging>pom</packaging>
-	<version>0.5.0</version>
+	<version>0.5.1-SNAPSHOT</version>
 	
 	<name>JGit :: Parent</name>
 	<url>http://repo.or.cz/w/egit.git</url>
